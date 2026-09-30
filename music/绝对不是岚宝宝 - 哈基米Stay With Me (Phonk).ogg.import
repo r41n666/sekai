@@ -1,0 +1,19 @@
+[remap]
+
+importer="oggvorbisstr"
+type="AudioStreamOggVorbis"
+uid="uid://dlomle8lreb6j"
+path="res://.godot/imported/绝对不是岚宝宝 - 哈基米Stay With Me (Phonk).ogg-52598929949d56436c78be7b8e98f57c.oggvorbisstr"
+
+[deps]
+
+source_file="res://music/绝对不是岚宝宝 - 哈基米Stay With Me (Phonk).ogg"
+dest_files=["res://.godot/imported/绝对不是岚宝宝 - 哈基米Stay With Me (Phonk).ogg-52598929949d56436c78be7b8e98f57c.oggvorbisstr"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

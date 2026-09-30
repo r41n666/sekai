@@ -1,0 +1,48 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/player.gd" id="1_player"]
+[ext_resource type="PackedScene" path="res://scenes/weapons/rifle.tscn" id="2_rifle"]
+[ext_resource type="Script" path="res://scripts/shooting/recoil_system.gd" id="3_recoil"]
+[ext_resource type="Script" path="res://scripts/shooting/camera_sway.gd" id="4_sway"]
+[ext_resource type="Script" path="res://scripts/shooting/screen_shake.gd" id="5_shake"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_placeholder"]
+radius = 0.4
+height = 1.8
+
+[node name="Player" type="CharacterBody3D" groups=["player"]]
+collision_layer = 1
+collision_mask = 3
+script = ExtResource("1_player")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape3D_player")
+
+[node name="MikuModel" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+mesh = SubResource("CapsuleMesh_placeholder")
+
+[node name="Rifle" parent="MikuModel" instance=ExtResource("2_rifle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.24, 0.32, 0.28)
+
+[node name="CameraPivot" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
+
+[node name="RecoilPivot" type="Node3D" parent="CameraPivot" groups=["recoil"]]
+script = ExtResource("3_recoil")
+
+[node name="SwayPivot" type="Node3D" parent="CameraPivot/RecoilPivot"]
+script = ExtResource("4_sway")
+
+[node name="SpringArm3D" type="SpringArm3D" parent="CameraPivot/RecoilPivot/SwayPivot"]
+spring_length = 3.5
+collision_mask = 2
+
+[node name="Camera3D" type="Camera3D" parent="CameraPivot/RecoilPivot/SwayPivot/SpringArm3D" groups=["camera"]]
+fov = 75.0
+script = ExtResource("5_shake")
