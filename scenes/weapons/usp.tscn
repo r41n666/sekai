@@ -1,0 +1,79 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/shooting/weapon.gd" id="1_weapon"]
+[ext_resource type="Script" path="res://scripts/shooting/audio_3d.gd" id="2_gun_audio"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_gun"]
+albedo_color = Color(0.14, 0.15, 0.17, 1)
+metallic = 0.9
+roughness = 0.3
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_flash"]
+shading_mode = 0
+albedo_color = Color(1, 0.92, 0.62, 1)
+emission_enabled = true
+emission = Color(1, 0.88, 0.55, 1)
+emission_energy_multiplier = 6.0
+
+[sub_resource type="BoxMesh" id="BoxMesh_slide"]
+size = Vector3(0.045, 0.055, 0.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_grip"]
+size = Vector3(0.04, 0.11, 0.055)
+
+[sub_resource type="BoxMesh" id="BoxMesh_mag"]
+size = Vector3(0.032, 0.09, 0.04)
+
+[sub_resource type="SphereMesh" id="SphereMesh_flash"]
+radius = 0.03
+height = 0.06
+
+[node name="USP" type="Node3D"]
+script = ExtResource("1_weapon")
+display_name = "USP · 半自动"
+magazine_size = 12
+reserve_ammo = 24
+reload_time = 2.2
+automatic = false
+rpm = 400.0
+damage = 34.0
+ads_fov = 60.0
+ads_speed = 11.0
+shake_per_shot = 0.18
+tracer_lifetime = 0.035
+
+[node name="Slide" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.02, 0.06)
+mesh = SubResource("BoxMesh_slide")
+material_override = SubResource("StandardMaterial3D_gun")
+
+[node name="Grip" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.966, 0.259, 0, -0.259, 0.966, 0, -0.05, 0)
+mesh = SubResource("BoxMesh_grip")
+material_override = SubResource("StandardMaterial3D_gun")
+
+[node name="Magazine" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.075, 0.02)
+mesh = SubResource("BoxMesh_mag")
+material_override = SubResource("StandardMaterial3D_gun")
+
+[node name="Muzzle" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.025, 0.2)
+
+[node name="MuzzleLight" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.025, 0.2)
+visible = false
+light_color = Color(1, 0.85, 0.55, 1)
+light_energy = 2.5
+omni_range = 4.0
+
+[node name="MuzzleFlash" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.025, 0.21)
+visible = false
+mesh = SubResource("SphereMesh_flash")
+material_override = SubResource("StandardMaterial3D_flash")
+
+[node name="GunAudio" type="AudioStreamPlayer3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.025, 0.15)
+unit_size = 12.0
+script = ExtResource("2_gun_audio")

@@ -62,11 +62,15 @@ func _draw() -> void:
 		var distance := _camera.global_position.distance_to(world)
 		_draw_diamond(screen_pos, on_edge)
 
+		var display_name := String(node.name)
+		var custom_name = node.get("player_name")
+		if custom_name is String and not custom_name.is_empty():
+			display_name = custom_name
 		var base := screen_pos + Vector2(icon_size + 3.0, icon_size * 0.5)
 		draw_string(
 			font,
 			base,
-			String(node.name),
+			display_name,
 			HORIZONTAL_ALIGNMENT_LEFT,
 			-1,
 			name_font_size,

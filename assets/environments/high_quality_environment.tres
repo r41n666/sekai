@@ -1,17 +1,35 @@
-[gd_resource type="Environment" load_steps=3 format=3]
+[gd_resource type="Environment" load_steps=6 format=3]
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_clouds"]
+frequency = 0.003
+fractal_octaves = 6
+fractal_gain = 0.55
+fractal_lacunarity = 2.1
+
+[sub_resource type="Gradient" id="Gradient_clouds"]
+offsets = PackedFloat32Array(0, 0.42, 0.62, 1)
+colors = PackedColorArray(0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1)
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_clouds"]
+width = 1024
+height = 512
+seamless = true
+noise = SubResource("FastNoiseLite_clouds")
+color_ramp = SubResource("Gradient_clouds")
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_hq"]
-sky_top_color = Color(0.24, 0.42, 0.75, 1)
-sky_horizon_color = Color(0.72, 0.79, 0.87, 1)
-sky_curve = 0.12
-ground_bottom_color = Color(0.12, 0.11, 0.1, 1)
-ground_horizon_color = Color(0.72, 0.79, 0.87, 1)
-sun_angle_max = 25.0
-sun_curve = 0.12
+sky_top_color = Color(0.13, 0.37, 0.83, 1)
+sky_horizon_color = Color(0.76, 0.88, 0.98, 1)
+sky_curve = 0.09
+sky_energy_multiplier = 1.0
+sky_cover = SubResource("NoiseTexture2D_clouds")
+sky_cover_modulate = Color(1, 1, 1, 1)
+ground_horizon_color = Color(0.76, 0.88, 0.98, 1)
+ground_bottom_color = Color(0.34, 0.55, 0.8, 1)
+ground_curve = 0.05
 
 [sub_resource type="Sky" id="Sky_hq"]
 sky_material = SubResource("ProceduralSkyMaterial_hq")
-process_mode = 0
 radiance_size = 3
 
 [resource]
@@ -38,20 +56,14 @@ ssao_enabled = true
 ssao_radius = 0.5
 ssao_intensity = 2.0
 ssao_light_affect = 1.0
-ssao_ao_channel_affect = 0.0
 ssr_enabled = true
-ssr_max_steps = 64
-ssr_fade_in = 0.15
-ssr_fade_out = 2.0
-sdfgi_enabled = true
-sdfgi_cascades = 4
-sdfgi_min_cell_size = 0.2
-sdfgi_bounce_feedback = 0.5
-sdfgi_energy = 1.0
-sdfgi_y_scale = 0.5
+ssr_max_steps = 96
+ssr_fade_in = 0.2
+ssr_fade_out = 4.0
+sdfgi_enabled = false
 volumetric_fog_enabled = true
-volumetric_fog_density = 0.01
+volumetric_fog_density = 0.004
 volumetric_fog_albedo = Color(1, 1, 1, 1)
 volumetric_fog_gi_inject = 1.0
 volumetric_fog_anisotropy = 0.2
-volumetric_fog_length = 64.0
+volumetric_fog_length = 128.0

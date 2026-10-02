@@ -70,8 +70,7 @@ var _rng := RandomNumberGenerator.new()
 
 func _ready() -> void:
 	_rng.randomize()
-	if not is_in_group("recoil"):
-		add_to_group("recoil") # 供 HUD 读取扩散值
+	# 注意：「recoil」组由本地玩家在 player.gd 里添加，避免远端玩家的后坐力系统被 HUD 找到
 	_build_pattern()
 
 

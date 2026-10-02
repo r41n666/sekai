@@ -17,6 +17,9 @@ signal aiming_changed(aiming: bool)
 ## 命中反馈：目标名称 / 是否击杀（HUD 用来显示命中标记与击杀日志）
 signal hit_confirmed(target_name: String, killed: bool)
 
+## HUD 上显示的武器名
+@export var display_name := "武器"
+
 @export_group("弹药")
 @export var magazine_size := 30
 @export var reserve_ammo := 120
@@ -58,8 +61,12 @@ var _reserve := 0
 var _fire_cooldown := 0.0
 var _trigger_held := false
 var _trigger_enabled := true
+## 是否已掏出（收起武器 = 空手状态）
+var active := true
 var _reloading := false
 var _reload_timer := 0.0
+## 长按 R 计时（3 秒补满备弹）
+var _reset_hold := 0.0
 var _aiming := false
 var _flash_timer := 0.0
 var _tracer_timer := 0.0
@@ -72,8 +79,7 @@ var _impact_light: OmniLight3D
 func _ready() -> void:
 	_mag = magazine_size
 	_reserve = reserve_ammo
-	if not is_in_group("weapon"):
-		add_to_group("weapon") # 供 HUD 查找
+	# 注意：「weapon」组由本地玩家在 player.gd 里添加，避免远端玩家的武器被 HUD 找到
 	_build_effects()
 
 
@@ -93,6 +99,23 @@ func set_trigger_enabled(enabled: bool) -> void:
 		_trigger_held = false
 
 
+## 掏出 / 收起武器（收起 = 空手：不能射击 / 开镜 / 换弹；显示与隐藏由 player.gd 控制）
+func set_active(value: bool) -> void:
+	active = value
+	if active:
+		return
+	_trigger_held = false
+	if _aiming:
+		_aiming = false
+		aiming_changed.emit(false)
+		if _recoil:
+			_recoil.set_aiming(false)
+		if _player != null and _player.has_method("set_aiming"):
+			_player.set_aiming(false)
+		if _camera != null:
+			_camera.fov = hip_fov
+
+
 func _process(delta: float) -> void:
 	if _player == null or _camera == null:
 		return
@@ -107,6 +130,23 @@ func _process(delta: float) -> void:
 		_tracer.visible = false
 	if _impact_timer <= 0.0 and _impact_light:
 		_impact_light.visible = false
+
+	if not _player.is_multiplayer_authority():
+		return # 远端玩家的武器只播放同步过来的开火特效
+
+	if not active:
+		return # 空手状态：不响应射击 / 开镜 / 换弹
+
+	# 长按 R 3 秒：备弹补满（补给站式重置）
+	if Input.is_action_pressed("reload"):
+		_reset_hold += delta
+		if _reset_hold >= 3.0:
+			_reset_hold = 0.0
+			if _reserve < reserve_ammo:
+				_reserve = reserve_ammo
+				ammo_changed.emit(_mag, _reserve)
+	else:
+		_reset_hold = 0.0
 
 	if Input.is_action_just_pressed("reload"):
 		start_reload()
@@ -215,7 +255,9 @@ func _fire() -> void:
 	_audio.play_shot()
 
 	_show_muzzle_flash()
-	_hitscan()
+	var end_point := _hitscan()
+	if NetworkManager.is_online:
+		net_fire_effects.rpc(end_point)
 
 
 func _show_muzzle_flash() -> void:
@@ -227,7 +269,16 @@ func _show_muzzle_flash() -> void:
 	_muzzle_flash.scale = Vector3.ONE * randf_range(0.8, 1.25)
 
 
-func _hitscan() -> void:
+## 联机：把本端开火特效同步给其他端（枪口火光 / 曳光弹 / 3D 枪声）
+@rpc("any_peer", "call_remote", "unreliable")
+func net_fire_effects(end_point: Vector3) -> void:
+	_show_muzzle_flash()
+	if _tracer:
+		_draw_tracer(_muzzle.global_position, end_point)
+	_audio.play_shot()
+
+
+func _hitscan() -> Vector3:
 	var space := get_world_3d().direct_space_state
 	var origin := _camera.global_position
 	var basis := _camera.global_transform.basis
@@ -251,15 +302,36 @@ func _hitscan() -> void:
 		end_point = hit.position
 		var collider = hit.collider
 		if collider != null and collider.has_method("take_damage"):
-			collider.take_damage(damage)
-			var health = collider.get("health")
-			var killed: bool = health != null and float(health) <= 0.0
+			var killed := _deal_damage(collider)
 			hit_confirmed.emit(_display_name_of(collider), killed)
 		else:
 			_show_impact(hit.position, hit.normal)
 
 	if _tracer:
 		_draw_tracer(_muzzle.global_position, end_point)
+	return end_point
+
+
+## 造成伤害并返回是否击杀：单机直接扣血；联机时训练靶在所有端一起结算，玩家只发给被击中的本人
+func _deal_damage(collider) -> bool:
+	var hp_before = collider.get("health")
+	if hp_before != null and float(hp_before) <= 0.0:
+		return false # 目标已倒下（训练靶等待复活 / 玩家血量已归零）
+	var killed: bool = hp_before != null and float(hp_before) - damage <= 0.0
+	if NetworkManager.is_online and collider is Node:
+		if collider.is_in_group("friendly"):
+			# 其他玩家：只让被击中的那一端扣血（他的 HUD 与镜头震动由本端响应）
+			collider.apply_network_damage.rpc_id(
+				collider.get_multiplayer_authority(), damage, NetworkManager.get_my_name()
+			)
+		else:
+			# 训练靶等场景物件：广播到所有端一起结算，保持各端状态一致
+			NetworkManager.apply_damage_to_target.rpc(
+				str(collider.get_path()), damage, NetworkManager.get_my_name()
+			)
+	else:
+		collider.take_damage(damage)
+	return killed
 
 
 func _display_name_of(node: Object) -> String:

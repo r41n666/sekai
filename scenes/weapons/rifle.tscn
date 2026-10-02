@@ -36,6 +36,7 @@ rings = 4
 
 [node name="Rifle" type="Node3D"]
 script = ExtResource("1_weapon")
+display_name = "MK-1 突击步枪"
 
 [node name="Body" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.02)

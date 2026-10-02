@@ -25,8 +25,10 @@ class_name GameHUD
 @onready var _health_label: Label = $HealthRoot/HealthLabel
 @onready var _mag_label: Label = $AmmoPanel/AmmoRow/MagLabel
 @onready var _reserve_label: Label = $AmmoPanel/AmmoRow/ReserveLabel
+@onready var _weapon_label: Label = $AmmoPanel/WeaponLabel
 @onready var _reload_bar: ProgressBar = $AmmoPanel/ReloadBar
 @onready var _kill_feed: VBoxContainer = $KillFeed
+@onready var _leave_button: Button = $LeaveButton
 
 var _player: Node
 var _weapon: Node
@@ -35,9 +37,19 @@ var _bound := false
 
 
 func _ready() -> void:
+	add_to_group("hud") # 供 NetworkManager 推送联机击杀信息
 	_crosshair.set_spread(0.0)
 	_reload_bar.visible = false
+	_leave_button.pressed.connect(_on_leave_pressed)
 	_bind()
+
+
+## 返回大厅：联机时退出对局；单机时直接回大厅
+func _on_leave_pressed() -> void:
+	if NetworkManager.is_online:
+		NetworkManager.leave_game()
+	else:
+		get_tree().change_scene_to_file(NetworkManager.HUB_SCENE)
 
 
 func _process(_delta: float) -> void:
@@ -48,7 +60,7 @@ func _process(_delta: float) -> void:
 
 	_crosshair.set_spread(_recoil.get_spread())
 
-	var reloading: bool = _weapon.is_reloading()
+	var reloading: bool = _weapon.has_method("is_reloading") and _weapon.is_reloading()
 	_reload_bar.visible = reloading
 	if reloading:
 		_reload_bar.value = _weapon.get_reload_progress() * 100.0
@@ -60,25 +72,58 @@ func _process(_delta: float) -> void:
 ## 找到玩家 / 武器 / 后坐力系统并连接信号（找不到就下一帧再试）
 func _bind() -> void:
 	_player = get_tree().get_first_node_in_group("player")
-	_weapon = get_tree().get_first_node_in_group("weapon")
 	_recoil = get_tree().get_first_node_in_group("recoil")
-	if _player == null or _weapon == null or _recoil == null:
+	if _player == null or _recoil == null:
 		return
 
 	if _player.has_signal("health_changed"):
 		if not _player.health_changed.is_connected(_on_health_changed):
 			_player.health_changed.connect(_on_health_changed)
 		_on_health_changed(_player.get_health(), _player.get_max_health())
+	if _player.has_signal("weapon_changed"):
+		if not _player.weapon_changed.is_connected(_on_weapon_changed):
+			_player.weapon_changed.connect(_on_weapon_changed)
 
-	if not _weapon.ammo_changed.is_connected(_on_ammo_changed):
-		_weapon.ammo_changed.connect(_on_ammo_changed)
-		_weapon.aiming_changed.connect(_on_aiming_changed)
-		_weapon.reload_started.connect(_on_reload_started)
-		_weapon.reload_finished.connect(_on_reload_finished)
-		_weapon.hit_confirmed.connect(_on_hit_confirmed)
-	_on_ammo_changed(_weapon.get_mag(), _weapon.get_reserve())
-
+	_bind_weapon(get_tree().get_first_node_in_group("weapon"))
 	_bound = true
+
+
+## 切换武器 / 空手：重新绑定并刷新显示
+func _on_weapon_changed(weapon: Node) -> void:
+	_bind_weapon(weapon)
+
+
+func _bind_weapon(weapon: Node) -> void:
+	_weapon = weapon
+	if _weapon != null:
+		if _weapon.has_signal("ammo_changed") and not _weapon.ammo_changed.is_connected(_on_ammo_changed):
+			_weapon.ammo_changed.connect(_on_ammo_changed)
+		if _weapon.has_signal("aiming_changed") and not _weapon.aiming_changed.is_connected(_on_aiming_changed):
+			_weapon.aiming_changed.connect(_on_aiming_changed)
+		if _weapon.has_signal("reload_started") and not _weapon.reload_started.is_connected(_on_reload_started):
+			_weapon.reload_started.connect(_on_reload_started)
+		if _weapon.has_signal("reload_finished") and not _weapon.reload_finished.is_connected(_on_reload_finished):
+			_weapon.reload_finished.connect(_on_reload_finished)
+		if _weapon.has_signal("hit_confirmed") and not _weapon.hit_confirmed.is_connected(_on_hit_confirmed):
+			_weapon.hit_confirmed.connect(_on_hit_confirmed)
+	_update_weapon_display()
+
+
+## 武器名 / 弹药显示（空手或近战显示 —）
+func _update_weapon_display() -> void:
+	_reload_bar.visible = false
+	if _weapon == null:
+		_weapon_label.text = "空手"
+		_mag_label.text = "—"
+		_reserve_label.text = ""
+		return
+	var weapon_name = _weapon.get("display_name")
+	_weapon_label.text = String(weapon_name) if weapon_name is String and not String(weapon_name).is_empty() else "武器"
+	if _weapon.has_method("get_mag") and _weapon.has_method("get_reserve"):
+		_on_ammo_changed(int(_weapon.get_mag()), int(_weapon.get_reserve()))
+	else:
+		_mag_label.text = "—"
+		_reserve_label.text = ""
 
 
 func _on_health_changed(current: float, maximum: float) -> void:
@@ -91,7 +136,7 @@ func _on_health_changed(current: float, maximum: float) -> void:
 
 func _on_ammo_changed(mag: int, reserve: int) -> void:
 	_mag_label.text = "%d" % mag
-	_reserve_label.text = "/ %d" % reserve
+	_reserve_label.text = "/ %d" % reserve if reserve > 0 else ""
 	_mag_label.modulate = Color(1.0, 0.55, 0.5) if mag == 0 else Color(1.0, 1.0, 1.0)
 
 

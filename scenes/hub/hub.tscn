@@ -1,0 +1,176 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/hub.gd" id="1_hub"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_card"]
+content_margin_left = 24.0
+content_margin_top = 20.0
+content_margin_right = 24.0
+content_margin_bottom = 20.0
+bg_color = Color(0.07, 0.1, 0.14, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.55, 0.8, 1, 0.3)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[node name="Hub" type="Control"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_hub")
+
+[node name="Background" type="ColorRect" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.03, 0.05, 0.08, 1)
+
+[node name="Center" type="CenterContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Card" type="PanelContainer" parent="Center"]
+custom_minimum_size = Vector2(580, 0)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="VBox" type="VBoxContainer" parent="Center/Card"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Center/Card/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.97, 1, 1)
+theme_override_font_sizes/font_size = 26
+text = "MikuHighQualityWalk · 联机大厅"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="Center/Card/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.68, 0.82, 0.92, 0.85)
+theme_override_font_sizes/font_size = 13
+text = "阶段 3 · ENet 局域网联机（默认端口 7777）"
+horizontal_alignment = 1
+
+[node name="NameRow" type="HBoxContainer" parent="Center/Card/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="NameLabel" type="Label" parent="Center/Card/VBox/NameRow"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "昵称"
+
+[node name="NameEdit" type="LineEdit" parent="Center/Card/VBox/NameRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="HostRow" type="HBoxContainer" parent="Center/Card/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="HostLabel" type="Label" parent="Center/Card/VBox/HostRow"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "端口"
+
+[node name="HostPortEdit" type="LineEdit" parent="Center/Card/VBox/HostRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+text = "7777"
+
+[node name="HostButton" type="Button" parent="Center/Card/VBox/HostRow"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+text = "创建房间"
+
+[node name="JoinRow" type="HBoxContainer" parent="Center/Card/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="JoinLabel" type="Label" parent="Center/Card/VBox/JoinRow"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "主机 IP"
+
+[node name="JoinIpEdit" type="LineEdit" parent="Center/Card/VBox/JoinRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "26.x.x.x 或 127.0.0.1"
+
+[node name="JoinPortEdit" type="LineEdit" parent="Center/Card/VBox/JoinRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+text = "7777"
+
+[node name="JoinButton" type="Button" parent="Center/Card/VBox/JoinRow"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+text = "加入房间"
+
+[node name="StatusLabel" type="Label" parent="Center/Card/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.92, 1, 0.95)
+theme_override_font_sizes/font_size = 13
+text = "创建房间后把本机 IP 发给朋友；或输入房主 IP 加入房间。"
+autowrap_mode = 3
+
+[node name="LocalIpLabel" type="Label" parent="Center/Card/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.72, 0.82, 0.8)
+theme_override_font_sizes/font_size = 12
+text = "本机 IP：检测中…"
+autowrap_mode = 3
+
+[node name="RoomPanel" type="VBoxContainer" parent="Center/Card/VBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="RoomTitle" type="Label" parent="Center/Card/VBox/RoomPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.97, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "房间玩家"
+
+[node name="PlayerList" type="VBoxContainer" parent="Center/Card/VBox/RoomPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="StartButton" type="Button" parent="Center/Card/VBox/RoomPanel"]
+layout_mode = 2
+text = "开始对战"
+
+[node name="WaitLabel" type="Label" parent="Center/Card/VBox/RoomPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.85, 0.95, 0.9)
+theme_override_font_sizes/font_size = 13
+text = "等待房主开始对战…"
+
+[node name="LeaveButton" type="Button" parent="Center/Card/VBox/RoomPanel"]
+layout_mode = 2
+text = "离开房间"
+
+[node name="SoloButton" type="Button" parent="Center/Card/VBox"]
+layout_mode = 2
+text = "单人试玩（离线）"
+
+[node name="Footer" type="Label" parent="Center/Card/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.68, 0.78, 0.7)
+theme_override_font_sizes/font_size = 12
+text = "蓝盾 VPN：双方加入同一虚拟局域网，用 26.x.x.x 虚拟 IP 直连（详细步骤见 README 第八节）。"
+autowrap_mode = 3
