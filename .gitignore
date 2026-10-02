@@ -1,3 +1,7 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# Python 工具脚本的缓存（tools/ 下的转换脚本）
+__pycache__/
+*.pyc

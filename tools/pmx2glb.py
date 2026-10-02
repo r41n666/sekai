@@ -81,6 +81,26 @@ class Reader:
 
 
 def read_pmx(path: Path):
+    """解析 PMX；材质变形（type 8）在 2.0 与 2.1 里字段不同，这里两种都试，取能完整解析到文件尾的那种。"""
+    best = None
+    errors = []
+    for tint in (True, False):
+        try:
+            model = _read_pmx(path, tint)
+        except Exception as exc:  # 中途失步会读越界，换另一种布局再试
+            errors.append(exc)
+            continue
+        model["material_morph_tint"] = tint
+        if model["end"] == model["size"]:
+            return model
+        if best is None or abs(model["size"] - model["end"]) < abs(best["size"] - best["end"]):
+            best = model
+    if best is not None:
+        return best
+    raise errors[0]
+
+
+def _read_pmx(path: Path, material_morph_tint: bool):
     r = Reader(path.read_bytes())
     magic = r.d[0:4]
     if magic != b"PMX ":
@@ -164,30 +184,35 @@ def read_pmx(path: Path):
         face_count = r.u32()
         materials.append({"name": name, "diffuse": diffuse, "texture": tex_index, "faces": face_count})
 
-    # 骨骼
+    # 骨骼（标志位按 PMX 2.0 规范：位0 接续先 / 位5 IK / 位8-9 付与 / 位10 轴固定 / 位11 局部轴 / 位13 外部亲）
     bones = []
     for _ in range(r.u32()):
         name = r.text(enc)
         r.text(enc)
         pos = r.vec(3)
         parent = r.index(sizes["bone"])
-        r.i32()
+        r.i32()  # 变形阶（layer）
         flags = r.u16()
-        if flags & 0x0001:
+        if flags & 0x0001:  # 接续先 = 骨骼索引（否则是坐标偏移）
             r.index(sizes["bone"])
         else:
             r.vec(3)
-        if flags & 0x0002:
+        if flags & 0x0020:  # IK
+            r.index(sizes["bone"])  # 目标骨骼
+            r.u32()  # 循环次数
+            r.f32()  # 单位角限制
+            for _ in range(r.u32()):  # 链接骨骼
+                r.index(sizes["bone"])
+                if r.u8():
+                    r.vec(6)  # 角度限制 min / max
+        if flags & 0x0100 or flags & 0x0200:  # 回転付与 / 移動付与（共用一个付与亲）
             r.index(sizes["bone"])
             r.f32()
-        if flags & 0x0004:
-            r.index(sizes["bone"])
-            r.f32()
-        if flags & 0x0008:
+        if flags & 0x0400:  # 轴固定
             r.vec(3)
-        if flags & 0x0010:
+        if flags & 0x0800:  # 局部轴
             r.vec(6)
-        if flags & 0x0080:
+        if flags & 0x2000:  # 外部亲
             r.i32()
         bones.append({"name": name, "pos": pos, "parent": parent})
 
@@ -201,6 +226,7 @@ def read_pmx(path: Path):
         for _ in range(count):
             if morph_type == 0:
                 r.index(sizes["morph"])
+                r.f32()  # 影响权重
             elif morph_type == 1:
                 r.index(sizes["vertex"])
                 r.vec(3)
@@ -219,16 +245,24 @@ def read_pmx(path: Path):
                 r.vec(3)
                 r.vec(4)
                 r.f32()
-                r.index(sizes["texture"])
-                r.index(sizes["texture"])
-                r.u8()
-                r.index(sizes["texture"])
+                if material_morph_tint:  # PMX 2.1 风格：贴图/环境/卡通的 tint
+                    r.vec(12)
+                else:  # PMX 2.0 风格：贴图 / 环境 / 卡通索引
+                    r.index(sizes["texture"])
+                    r.index(sizes["texture"])
+                    r.u8()
+                    if r.u8() == 0:  # 卡通参照 0 = 按索引，1 = 内置卡通
+                        r.index(sizes["texture"])
+                    else:
+                        r.u8()
             elif morph_type == 9:
                 r.index(sizes["morph"])
                 r.f32()
             else:
-                r.index(sizes["rigid"])
-                r.vec(3)
+                r.index(sizes["rigid"])  # 刚体变形（type 10）
+                r.u8()  # 本地标志
+                r.vec(3)  # 移动速度
+                r.vec(3)  # 旋转扭矩
 
     # 显示枠（跳过）
     for _ in range(r.u32()):
@@ -260,7 +294,7 @@ def read_pmx(path: Path):
         r.u8()
         r.index(sizes["rigid"])
         r.index(sizes["rigid"])
-        r.vec(9)
+        r.vec(24)  # 位置 / 旋转 / 移动限制上下限 / 旋转限制上下限 / 弹簧移动 / 弹簧旋转
 
     return {
         "version": version, "vertices": vertices, "faces": faces, "textures": textures,
