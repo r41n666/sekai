@@ -75,6 +75,7 @@ func _ready() -> void:
 	if not model_path.is_empty():
 		_model.model_path = model_path
 		_model.load_model(model_path)
+	_model.set_holding_weapon(true) # 人机永远端着枪
 	_setup_hit_flash()
 	_setup_hit_audio()
 	_fire_timer = randf_range(0.3, 1.2) # 出生后不要立刻开枪

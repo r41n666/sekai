@@ -23,16 +23,33 @@ class_name MikuModel
 @export var walk_keys: PackedStringArray = PackedStringArray(["walk", "move"])
 @export var run_keys: PackedStringArray = PackedStringArray(["run", "sprint"])
 @export var jump_keys: PackedStringArray = PackedStringArray(["jump", "fall", "air"])
-## 右手骨骼关键字（把武器挂到手上用）
+## 右手骨骼关键字（把武器挂到手上用；「手首」= 手腕，优先于 Twist / 指尖等辅助骨）
 @export var hand_bone_keys: PackedStringArray = PackedStringArray(
-	["hand_r", "righthand", "right_hand", "wrist_r", "hand.r", "右手"]
+	["hand_r", "righthand", "right_hand", "wrist_r", "hand.r", "右手首", "手首", "右手"]
 )
-## 枪挂到手骨骼上时的相对位置（在 Inspector 里对着模型调）
+## 名字里带这些词的不算「手」（Twist 辅助骨 / 手指 / 握り 之类），否则武器会挂在奇怪的位置
+const HAND_BONE_BLOCK := ["捩", "指", "握り", "拡散", "先", "ik", "親", "end"]
+## 枪挂到手骨骼上时的相对位置（武器空间微调，米）
 @export var hand_offset := Vector3.ZERO
+## 武器相对角色正前方的额外旋转（度，一般不用动；用来微调枪口俯仰 / 侧倾）
+@export var hand_rotation_deg := Vector3.ZERO
+## 第一人称时武器相对相机的摆放（相机空间：+X 右 / +Y 上 / -Z 前）
+@export var view_offset := Vector3(0.2, -0.16, -0.4)
+## 开镜（右键 ADS）时第一人称武器的摆放：往画面中心收，像真的在瞄准
+@export var view_aim_offset := Vector3(0.02, -0.05, -0.45)
+## 第一人称时武器相对相机的偏航（度）：武器模型正面朝 +Z，转 180° 才对上镜头前方
+@export var view_yaw_deg := 180.0
 ## 动画状态切换的淡入时间（秒）
 @export var fade_time := 0.18
 ## 跑 / 走的判定阈值（速度比例）
 @export var run_threshold := 0.62
+
+## 几何法找右手时的排除词（头发 / 裙子等辅助骨骼不能当手）与最低高度比例
+const HAND_SEARCH_BLOCK := [
+	"hair", "skirt", "ribbon", "tail", "collider", "dummy", "shadow", "rigid", "joint",
+	"ik", "end", "offset", "捩", "髪", "スカート", "リボン", "影"
+]
+const HAND_MIN_RATIO := 0.55
 
 var model_loaded := false
 var current_state := ""
@@ -40,11 +57,21 @@ var current_state := ""
 var _placeholder: Node3D
 var _weapon_mount: Node3D
 var _weapon_home := Transform3D.IDENTITY
+var _weapon_attachment: BoneAttachment3D
+## 第三人称：武器挂点是否跟随右手骨骼（第一人称 / 没骨骼时为 false）
+var _weapon_follow := false
+## 是否处于「端着武器」状态（程序化姿态会把右手抬到身前）
+var _holding_weapon := false
 var _first_person := false
 var _loaded_model: Node
 var _anim: AnimationPlayer
 var _procedural: MikuProceduralPose
 var _state_clips: Dictionary = {} # idle / walk / run / jump -> 动画名
+
+## 第一人称时武器跟随的相机（由 player.gd 注入）；不设时退回模型节点下的默认位置
+var view_camera: Node3D
+## 是否开镜（由 player.gd 的 set_aiming 同步过来，第一人称下把武器收到画面中心）
+var _view_aiming := false
 
 
 func _ready() -> void:
@@ -55,10 +82,39 @@ func _ready() -> void:
 	load_model(model_path)
 
 
-## 第一人称：隐藏模型与占位胶囊（武器挂在 WeaponMount 上，保留可见）
+## 装备 / 空手切换时由 player.gd 调用：程序化姿态据此决定右手是垂着还是端起来
+func set_holding_weapon(on: bool) -> void:
+	_holding_weapon = on
+	if _procedural != null:
+		_procedural.holding_weapon = on
+
+
+## 开镜 / 收镜时由 player.gd 调用：第一人称下武器跟着收进画面中心
+func set_view_aiming(on: bool) -> void:
+	_view_aiming = on
+
+
+## 第一人称：隐藏模型与占位胶囊，武器改为贴着相机显示（否则跟着模型一起被隐藏，V 键看不到枪）。
+## 注意：WeaponMount 始终留在 MikuModel 下（只改它的世界变换），
+## player.gd / bot.gd 里的固定路径 $MikuModel/WeaponMount/... 才不会失效。
 func set_first_person(on: bool) -> void:
 	_first_person = on
+	if _weapon_mount != null:
+		if on:
+			_weapon_follow = false
+		elif _loaded_model != null and is_instance_valid(_loaded_model):
+			_attach_weapon_to_hand(_loaded_model)
 	_apply_model_visibility()
+
+
+## 每帧把武器摆到该在的位置：第一人称贴相机，第三人称贴右手骨骼
+func _process(_delta: float) -> void:
+	if _weapon_mount == null:
+		return
+	if _first_person:
+		_follow_view_camera()
+	elif _weapon_follow:
+		_follow_hand_bone()
 
 
 func _apply_model_visibility() -> void:
@@ -108,7 +164,8 @@ func load_model(path: String) -> bool:
 	_anim = _find_animation_player(_loaded_model)
 	_build_state_clips()
 	_fit_to_capsule(_loaded_model)
-	_attach_weapon_to_hand(_loaded_model)
+	if not _first_person:
+		_attach_weapon_to_hand(_loaded_model)
 	_start_procedural_pose(_loaded_model)
 	model_loaded = true
 	# 必须在 model_loaded = true 之后再刷新可见性，否则占位胶囊不会隐藏（会和模型重叠）
@@ -148,6 +205,7 @@ func _start_procedural_pose(model: Node) -> void:
 	if skeleton == null:
 		return
 	var pose := MikuProceduralPose.new()
+	pose.holding_weapon = _holding_weapon
 	if pose.setup(skeleton, self):
 		_procedural = pose
 		print("MikuModel：模型没有动画，已启用程序化姿态 ", pose.debug_names)
@@ -157,6 +215,7 @@ func _clear_loaded_model() -> void:
 	if _loaded_model == null or not is_instance_valid(_loaded_model):
 		return
 	_detach_weapon_back()
+	_weapon_attachment = null # 旧骨架一起被释放
 	_loaded_model.queue_free()
 	_loaded_model = null
 	_anim = null
@@ -167,15 +226,58 @@ func _clear_loaded_model() -> void:
 	_apply_model_visibility()
 
 
-## 把武器从手骨骼挪回模型节点下（重新加载模型时用）
+## 把武器从手骨骼挪回模型节点下（重新加载模型 / 切第一人称时用）
 func _detach_weapon_back() -> void:
-	if _weapon_mount == null:
-		return
-	var parent := _weapon_mount.get_parent()
-	if parent != null and parent is BoneAttachment3D:
-		parent.remove_child(_weapon_mount)
-		add_child(_weapon_mount)
+	_weapon_follow = false
+	if _weapon_mount != null:
 		_weapon_mount.transform = _weapon_home
+
+
+## 第三人称：把武器挂点摆到右手上（每帧调用）。
+## 位置跟手（所以不会悬空），朝向固定为角色正前方——
+## MMD 手骨的朝向千奇百怪（还有 Twist 辅助骨），跟着手旋转会让走路摆臂时枪口乱甩；
+## 射击游戏里枪口本来就应该始终对着准星方向。hand_offset / hand_rotation_deg 用来微调。
+func _follow_hand_bone() -> void:
+	if _weapon_attachment == null or not is_instance_valid(_weapon_attachment):
+		return
+	var basis := global_transform.basis.orthonormalized() * Basis.from_euler(hand_rotation_deg)
+	_weapon_mount.global_transform = Transform3D(
+		basis, _weapon_attachment.global_position + basis * hand_offset
+	)
+
+
+## 第一人称：武器贴着相机放（相机空间偏移，跟着俯仰 / 转动走），做成「手持视角模型」。
+## 每把武器可以在自己的场景里覆盖 view_offset（枪长刀短，近距离摆放不一样）。
+func _follow_view_camera() -> void:
+	if view_camera == null or not is_instance_valid(view_camera):
+		_weapon_mount.transform = _weapon_home
+		return
+	var offset := view_offset
+	var yaw := view_yaw_deg
+	var weapon := _visible_weapon()
+	if weapon != null:
+		var custom_offset: Variant = weapon.get("view_offset")
+		if custom_offset is Vector3:
+			offset = custom_offset
+		var custom_yaw: Variant = weapon.get("view_yaw_deg")
+		if custom_yaw is float or custom_yaw is int:
+			yaw = float(custom_yaw)
+	var anchor := view_camera.global_transform
+	var cam_basis := anchor.basis.orthonormalized()
+	if _view_aiming:
+		offset = offset.lerp(view_aim_offset, 0.85) # 开镜：武器往画面中心收
+	var basis := cam_basis * Basis(Vector3.UP, deg_to_rad(yaw))
+	_weapon_mount.global_transform = Transform3D(basis, anchor.origin + cam_basis * offset)
+
+
+## 当前显示（已掏出）的武器，没掏武器时返回 null
+func _visible_weapon() -> Node3D:
+	if _weapon_mount == null:
+		return null
+	for child in _weapon_mount.get_children():
+		if child is Node3D and (child as Node3D).visible:
+			return child
+	return null
 
 
 func _build_state_clips() -> void:
@@ -213,9 +315,84 @@ func _match_bone(skeleton: Skeleton3D) -> String:
 		var lower_key := String(key).to_lower()
 		for bone_idx in skeleton.get_bone_count():
 			var bone_name := skeleton.get_bone_name(bone_idx)
-			if bone_name.to_lower().contains(lower_key):
-				return bone_name
+			if not bone_name.to_lower().contains(lower_key):
+				continue
+			if _is_blocked_bone(bone_name):
+				continue
+			return bone_name
 	return ""
+
+
+## 辅助骨判定：Twist（捩）/ 手指 / 指尖（先）等不能当「手」用
+func _is_blocked_bone(bone_name: String) -> bool:
+	var lower := bone_name.to_lower()
+	for keyword in HAND_BONE_BLOCK:
+		if lower.contains(String(keyword).to_lower()):
+			return true
+	return false
+
+
+## 找「右手」骨骼：先名字匹配（PMX 转换来的模型骨骼名正常），
+## 名字是乱码的模型（miku.glb）回退到几何启发式，否则武器只能挂在胸前悬空、不跟手。
+func _find_hand_bone(skeleton: Skeleton3D) -> String:
+	var by_name := _match_bone(skeleton)
+	if by_name != "":
+		return by_name
+	return _find_hand_bone_geometric(skeleton)
+
+
+## 几何启发式找右手：
+##   1) 只考虑「-X 侧」（模型正面 +Z 的项目约定下，右手在 -X）、腰以上、且名字不是
+##      头发 / 裙子 / IK / 末端 等辅助骨骼的骨；
+##   2) 取离身体中轴（竖直轴）最远的 == 手指尖；
+##   3) 从指尖沿父链往上走到第一个「分叉点」（子骨骼 ≥ 2）== 手腕，武器挂这里才不悬空。
+func _find_hand_bone_geometric(skeleton: Skeleton3D) -> String:
+	var count := skeleton.get_bone_count()
+	if count == 0:
+		return ""
+	var positions: Array[Vector3] = []
+	var min_y := INF
+	var max_y := -INF
+	for i in count:
+		var world: Vector3 = skeleton.global_transform * skeleton.get_bone_global_pose(i).origin
+		var local: Vector3 = global_transform.affine_inverse() * world # MikuModel 局部空间
+		positions.append(local)
+		min_y = minf(min_y, local.y)
+		max_y = maxf(max_y, local.y)
+	var height := maxf(max_y - min_y, 0.001)
+	var tip := -1
+	var tip_distance := 0.0
+	for i in count:
+		var bone_name := skeleton.get_bone_name(i).to_lower()
+		var blocked := false
+		for keyword in HAND_SEARCH_BLOCK:
+			if bone_name.contains(keyword):
+				blocked = true
+				break
+		if blocked:
+			continue
+		var point := positions[i]
+		if point.x > -0.02: # 右手在 -X 侧
+			continue
+		if (point.y - min_y) / height < HAND_MIN_RATIO: # 腰以上才算手臂
+			continue
+		var distance := Vector2(point.x, point.z).length()
+		if distance > tip_distance:
+			tip_distance = distance
+			tip = i
+	if tip < 0:
+		return ""
+	# 指尖 → 手腕：往上走到第一个分叉点（手腕是 5 根手指链的共同父级）
+	var current := tip
+	for step in 4:
+		var parent := skeleton.get_bone_parent(current)
+		if parent < 0:
+			break
+		if skeleton.get_bone_children(parent).size() >= 2:
+			current = parent
+			break
+		current = parent
+	return skeleton.get_bone_name(current)
 
 
 func _attach_weapon_to_hand(model: Node) -> void:
@@ -223,19 +400,21 @@ func _attach_weapon_to_hand(model: Node) -> void:
 		return
 	var skeleton := _find_skeleton(model)
 	if skeleton == null:
-		return # 没有骨骼：武器继续挂在模型节点下
-	var bone_name := _match_bone(skeleton)
+		_weapon_follow = false
+		return # 没有骨骼：武器留在模型节点下的默认位置
+	var bone_name := _find_hand_bone(skeleton)
 	if bone_name == "":
+		_weapon_follow = false
 		return # 没找到右手骨骼：同样保持原挂法
-	var attachment := BoneAttachment3D.new()
-	attachment.name = "WeaponHand"
-	skeleton.add_child(attachment)
+	var attachment := _weapon_attachment
+	if attachment == null or not is_instance_valid(attachment):
+		attachment = BoneAttachment3D.new()
+		attachment.name = "WeaponHand"
+		skeleton.add_child(attachment)
+		_weapon_attachment = attachment
 	attachment.bone_name = bone_name
-	var parent := _weapon_mount.get_parent()
-	if parent != null:
-		parent.remove_child(_weapon_mount)
-	attachment.add_child(_weapon_mount)
-	_weapon_mount.position = hand_offset
+	_weapon_follow = true
+	_follow_hand_bone()
 
 
 ## 占位胶囊底面在 MikuModel 局部空间的位置（height 1.8 → -0.9），模型脚底对齐到这里

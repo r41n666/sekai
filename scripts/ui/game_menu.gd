@@ -1,19 +1,25 @@
 extends CanvasLayer
 class_name GameMenu
-## Esc 菜单（阶段 5）：角色选择 / 退出游戏
+## Esc 菜单（阶段 5 + 武器皮肤 / 3D 检视）
 ##
 ## - Esc 开关菜单；打开时释放鼠标并屏蔽玩家输入（移动 / 跳跃 / 开火 / 开镜），关闭后重新锁定鼠标；
-## - 角色选择：扫描 res://assets/models/*/*.glb 生成列表，点击后切换本地玩家的 MikuModel 模型；
+## - 左栏：角色选择（扫描 res://assets/models/*/*.glb，点击后切换本地玩家的 MikuModel 模型）；
+## - 右栏：武器皮肤（先选武器槽，再点皮肤，立即生效）+ 上面的 3D 检视（武器自转预览）；
 ## - 退出游戏：联机时先退出房间（NetworkManager.leave_game），再退出进程；
 ## 与死亡界面 / 人机面板互斥（都在 game_ui 组，打开一个会关掉其它界面）。
 
 const UI_GROUP := "game_ui"
 
-@onready var _model_list: VBoxContainer = $Panel/VBox/ModelList
-@onready var _resume_button: Button = $Panel/VBox/ResumeButton
-@onready var _quit_button: Button = $Panel/VBox/QuitButton
+@onready var _model_list: VBoxContainer = $Panel/HBox/LeftVBox/ModelList
+@onready var _resume_button: Button = $Panel/HBox/LeftVBox/ResumeButton
+@onready var _quit_button: Button = $Panel/HBox/LeftVBox/QuitButton
+@onready var _weapon_buttons: GridContainer = $Panel/HBox/RightVBox/WeaponButtons
+@onready var _skin_list: VBoxContainer = $Panel/HBox/RightVBox/SkinList
+@onready var _preview: WeaponPreview = $Panel/HBox/RightVBox/Preview
 
 var _model_paths: Array[String] = []
+## 3D 检视 / 皮肤当前作用的武器槽
+var _slot := "Rifle"
 
 
 func _ready() -> void:
@@ -21,7 +27,10 @@ func _ready() -> void:
 	visible = false
 	_resume_button.pressed.connect(close_ui)
 	_quit_button.pressed.connect(_on_quit_pressed)
+	_build_weapon_buttons()
+	_build_skin_list()
 	_build_model_list()
+	_refresh_highlight()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -38,13 +47,15 @@ func is_open() -> bool:
 	return visible
 
 
-## 打开菜单：释放鼠标 + 屏蔽玩家输入
+## 打开菜单：释放鼠标 + 屏蔽玩家输入 + 让 3D 检视转起来
 func open_ui() -> void:
 	var player := _get_player()
 	if player != null and float(player.get_health()) <= 0.0:
 		return # 已阵亡：交给死亡界面
 	_close_other_uis()
 	visible = true
+	_refresh_preview()
+	_preview.set_preview_active(true)
 	_refresh_highlight()
 	if player != null and player.has_method("set_input_blocked"):
 		player.set_input_blocked(true) # 内部会释放鼠标
@@ -54,6 +65,7 @@ func close_ui() -> void:
 	if not visible:
 		return
 	visible = false
+	_preview.set_preview_active(false)
 	var player := _get_player()
 	if player != null and player.has_method("set_input_blocked"):
 		player.set_input_blocked(false)
@@ -120,6 +132,45 @@ func _select_model(path: String) -> void:
 	_refresh_highlight()
 
 
+## 武器槽按钮（步枪 / 手枪 / 蝴蝶刀 / 手雷）
+func _build_weapon_buttons() -> void:
+	for slot in WeaponSkin.SLOTS:
+		var button := Button.new()
+		button.text = String(WeaponSkin.WEAPON_NAMES.get(slot, slot))
+		button.pressed.connect(_select_slot.bind(slot))
+		_weapon_buttons.add_child(button)
+
+
+## 皮肤按钮（原版 / 伽玛多普勒 / 渐变之色 / 蓝钢）
+func _build_skin_list() -> void:
+	for skin in WeaponSkin.skins():
+		var button := Button.new()
+		button.text = String(skin["name"])
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.pressed.connect(_select_skin.bind(String(skin["id"])))
+		_skin_list.add_child(button)
+
+
+func _select_slot(slot: String) -> void:
+	_slot = slot
+	_refresh_preview()
+	_refresh_highlight()
+
+
+## 换皮肤：记下来 + 立即套到本端武器上 + 刷新 3D 检视
+func _select_skin(skin_id: String) -> void:
+	WeaponSkin.set_selected(_slot, skin_id)
+	var player := _get_player()
+	if player != null and player.has_method("set_weapon_skin"):
+		player.set_weapon_skin(_slot, skin_id)
+	_refresh_preview()
+	_refresh_highlight()
+
+
+func _refresh_preview() -> void:
+	_preview.show_weapon(_slot, WeaponSkin.get_selected(_slot))
+
+
 func _refresh_highlight() -> void:
 	var model := _get_local_model()
 	var current := model.model_path if model != null else ""
@@ -129,6 +180,20 @@ func _refresh_highlight() -> void:
 			continue
 		var path := _model_paths[i]
 		child.text = ("▶ " if path == current else "    ") + _display_name(path)
+	for i in _weapon_buttons.get_child_count():
+		var button := _weapon_buttons.get_child(i)
+		if not (button is Button):
+			continue
+		var slot: String = WeaponSkin.SLOTS[i]
+		button.text = ("▶ " if slot == _slot else "") + String(WeaponSkin.WEAPON_NAMES.get(slot, slot))
+	var chosen := WeaponSkin.get_selected(_slot)
+	var skins := WeaponSkin.skins()
+	for i in _skin_list.get_child_count():
+		var button := _skin_list.get_child(i)
+		if not (button is Button) or i >= skins.size():
+			continue
+		var skin_id := String(skins[i]["id"])
+		button.text = ("▶ " if skin_id == chosen else "    ") + String(skins[i]["name"])
 
 
 func _on_quit_pressed() -> void:

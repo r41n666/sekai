@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
-"""用 bpy（Python 版 Blender）把 .blend 导出成 glb。
+"""用 Blender 把 .blend 导出成 glb（两种跑法都支持）。
 
 - 只导出网格（不含灯光 / 相机 / 骨骼，武器道具用不上骨架）；
 - 有些 .blend 里的贴图没打包、外部文件也丢了，导出前会用文件里已打包的颜色贴图顶替，
   否则 glb 里的枪会没有颜色。
 
-用法：python tools/blend2glb.py <model.blend> <out.glb>
+用法（装了 bpy 的 Python）：
+    python tools/blend2glb.py <model.blend> <out.glb>
+用法（Blender 可执行文件，注意 -- 后面才是脚本参数）：
+    blender --background --python tools/blend2glb.py -- <model.blend> <out.glb>
 """
 import sys
 from pathlib import Path
@@ -14,6 +17,14 @@ import bpy
 
 ## 贴图最大边长（4096 的贴图会让 glb 涨到十几 MB，武器道具 2048 足够）
 MAX_TEXTURE_SIZE = 2048
+
+
+def _script_args() -> list:
+    """Blender 跑脚本时参数在 `--` 之后；用 bpy 模块直接跑时就是普通 sys.argv。"""
+    argv = sys.argv
+    if "--" in argv:
+        return argv[argv.index("--") + 1:]
+    return argv[1:]
 
 
 def repair_missing_textures() -> None:
@@ -42,10 +53,11 @@ def repair_missing_textures() -> None:
 
 
 def main() -> None:
-    if len(sys.argv) < 3:
+    args = _script_args()
+    if len(args) < 2:
         raise SystemExit(__doc__)
-    src = Path(sys.argv[1]).resolve()
-    dst = Path(sys.argv[2]).resolve()
+    src = Path(args[0]).resolve()
+    dst = Path(args[1]).resolve()
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     bpy.ops.wm.open_mainfile(filepath=str(src))

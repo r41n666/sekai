@@ -272,16 +272,23 @@ def read_pmx(path: Path):
 
 
 def face_positive_z(model: dict) -> None:
-    """把模型绕 Y 轴旋转 180°。
+    """转成项目约定：正面朝 +Z **且右手在 -X**（player.gd 的转向基准、miku.glb 的 `.R` 骨骼都在 -X）。
 
-    PMX 模型在原文件里面朝 -Z（用「右足首 → 右つま先」的骨骼位置就能验证：脚尖在足首的 -Z 方向），
-    而本项目约定模型正面朝 +Z（player.gd 的转向基准、miku.glb 也是 +Z）。
+    PMX 是左手坐标系（和 Unity 一样：X 右 / Y 上 / Z 朝屏幕里），角色在文件里面朝镜头（-Z）、
+    右手在 -X（「右手首」x=-5.2）。写进右手系的 glTF 必须做**一次镜像**，而不是纯旋转：
+      - 只取反 Z：正面 -Z → +Z，X 不动 → 右手留在 -X ✅；
+      - 若把 X、Z 一起取反（= 绕 Y 转 180°，之前就是这么写的），模型会被**镜像**：
+        右手跑到 +X，变成「左手持枪」，刘海等不对称细节也左右反了。
+    镜像会反转三角形绕序，所以每个三角形的后两个索引要交换，否则面朝向与法线相反。
     """
     for pos, normal, _uv, _bones, _weights in model["vertices"]:
-        pos[0], pos[2] = -pos[0], -pos[2]
-        normal[0], normal[2] = -normal[0], -normal[2]
+        pos[2] = -pos[2]
+        normal[2] = -normal[2]
     for bone in model["bones"]:
-        bone["pos"][0], bone["pos"][2] = -bone["pos"][0], -bone["pos"][2]
+        bone["pos"][2] = -bone["pos"][2]
+    faces = model["faces"]
+    for tri in range(0, len(faces) - 2, 3):
+        faces[tri + 1], faces[tri + 2] = faces[tri + 2], faces[tri + 1]
 
 
 def prune_stray_triangles(model: dict, limit: float = 1000.0):
@@ -427,7 +434,9 @@ def pack_glb(model: dict, pmx_dir: Path, out_path: Path):
                            (pos_min, pos_max))
     nrm_acc = add_accessor(add_view(b"".join(struct.pack("<3f", *v[1]) for v in vertices), TARGET_ARRAY),
                            COMP_F32, len(vertices), "VEC3")
-    uv_bytes = b"".join(struct.pack("<2f", v[2][0], 1.0 - v[2][1]) for v in vertices)
+    # 注意：PMX 的 UV 原点 / V 方向与 glTF 一致（都是左上角、V 向下），不要再翻 V——
+    # 翻了以后脸会采样到贴图的错误区域：眼睛整个消失、手臂出现彩虹色条纹。
+    uv_bytes = b"".join(struct.pack("<2f", v[2][0], v[2][1]) for v in vertices)
     uv_acc = add_accessor(add_view(uv_bytes, TARGET_ARRAY), COMP_F32, len(vertices), "VEC2")
 
     joint_bytes = b""

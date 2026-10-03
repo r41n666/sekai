@@ -10,6 +10,10 @@ signal ammo_changed(count: int, reserve: int)
 @export var throw_speed := 9.0
 @export var throw_up := 3.0
 @export var throw_cooldown := 0.7
+## 第一人称（V）时武器相对相机的摆放（相机空间）
+@export var view_offset := Vector3(0.16, -0.18, -0.34)
+## 第一人称时相对相机的偏航（度；武器模型正面朝 +Z，180 = 对准镜头前方）
+@export var view_yaw_deg := 180.0
 
 const PROJECTILE_SCENE := preload("res://scenes/weapons/grenade_projectile.tscn")
 
@@ -37,6 +41,11 @@ func set_trigger_enabled(_enabled: bool) -> void:
 
 func set_active(value: bool) -> void:
 	active = value
+
+
+## 套用武器皮肤（Esc 菜单 / player.gd 装备时调用；空 id = 原版）
+func apply_skin(skin_id: String) -> void:
+	WeaponSkin.apply_to(self, skin_id)
 
 
 ## 供 HUD 显示（鸭子类型，和枪一致）

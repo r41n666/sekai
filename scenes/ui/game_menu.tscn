@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/game_menu.gd" id="1_menu"]
+[ext_resource type="Script" path="res://scripts/ui/weapon_preview.gd" id="2_preview"]
 
 [node name="GameMenu" type="CanvasLayer"]
 layer = 2
@@ -21,44 +22,84 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -280.0
-offset_top = -240.0
-offset_right = 280.0
-offset_bottom = 240.0
+offset_left = -440.0
+offset_top = -270.0
+offset_right = 440.0
+offset_bottom = 270.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="VBox" type="VBoxContainer" parent="Panel"]
+[node name="HBox" type="HBoxContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="LeftVBox" type="VBoxContainer" parent="Panel/HBox"]
+custom_minimum_size = Vector2(360, 0)
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Title" type="Label" parent="Panel/VBox"]
+[node name="Title" type="Label" parent="Panel/HBox/LeftVBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 30
 text = "菜单"
 horizontal_alignment = 1
 
-[node name="ModelLabel" type="Label" parent="Panel/VBox"]
+[node name="ModelLabel" type="Label" parent="Panel/HBox/LeftVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.88, 0.95, 0.9)
 theme_override_font_sizes/font_size = 15
 text = "角色模型（点击切换本地玩家模型）"
 
-[node name="ModelList" type="VBoxContainer" parent="Panel/VBox"]
+[node name="ModelList" type="VBoxContainer" parent="Panel/HBox/LeftVBox"]
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 4
 
-[node name="HintLabel" type="Label" parent="Panel/VBox"]
+[node name="HintLabel" type="Label" parent="Panel/HBox/LeftVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.85, 0.95, 0.6)
 theme_override_font_sizes/font_size = 13
 text = "菜单打开时会释放鼠标并屏蔽移动 / 开火（人机不会暂停）"
 
-[node name="ResumeButton" type="Button" parent="Panel/VBox"]
+[node name="ResumeButton" type="Button" parent="Panel/HBox/LeftVBox"]
 layout_mode = 2
 text = "继续游戏（Esc）"
 
-[node name="QuitButton" type="Button" parent="Panel/VBox"]
+[node name="QuitButton" type="Button" parent="Panel/HBox/LeftVBox"]
 layout_mode = 2
 text = "退出游戏"
+
+[node name="RightVBox" type="VBoxContainer" parent="Panel/HBox"]
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="SkinLabel" type="Label" parent="Panel/HBox/RightVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.88, 0.95, 0.9)
+theme_override_font_sizes/font_size = 15
+text = "武器皮肤（先点武器，再点皮肤；下面就是 3D 检视）"
+
+[node name="WeaponButtons" type="GridContainer" parent="Panel/HBox/RightVBox"]
+layout_mode = 2
+columns = 4
+theme_override_constants/h_separation = 4
+theme_override_constants/v_separation = 4
+
+[node name="Preview" type="SubViewportContainer" parent="Panel/HBox/RightVBox"]
+custom_minimum_size = Vector2(400, 250)
+layout_mode = 2
+stretch = true
+script = ExtResource("2_preview")
+
+[node name="SkinList" type="VBoxContainer" parent="Panel/HBox/RightVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 4
+
+[node name="SkinHint" type="Label" parent="Panel/HBox/RightVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.85, 0.95, 0.6)
+theme_override_font_sizes/font_size = 13
+text = "皮肤会立即套到手上的武器上（原版 = 模型自带贴图）"
