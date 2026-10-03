@@ -7,11 +7,12 @@
 
 坐标保持 PMX 原样（Y 上，模型面向 +Z，和本项目约定一致；身高由 Godot 侧自动适配）。
 
-用法：python tools/pmx2glb.py <model.pmx> <out_dir>
+用法：python tools/pmx2glb.py <model.pmx> <out_dir> [out_name]
 """
 import json
 import struct
 import sys
+import zlib
 from pathlib import Path
 
 ENCODINGS = {0: "utf-16-le", 1: "utf-8"}
@@ -164,31 +165,36 @@ def read_pmx(path: Path):
         face_count = r.u32()
         materials.append({"name": name, "diffuse": diffuse, "texture": tex_index, "faces": face_count})
 
-    # 骨骼
+    # 骨骼（字段规则与 mmd_tools 的 Bone.load 一致：低位 flag 只是布尔标记，不占数据）
     bones = []
     for _ in range(r.u32()):
         name = r.text(enc)
         r.text(enc)
         pos = r.vec(3)
         parent = r.index(sizes["bone"])
-        r.i32()
+        r.i32()  # 变形顺序
         flags = r.u16()
-        if flags & 0x0001:
+        if flags & 0x0001:  # 尾骨骼：索引
             r.index(sizes["bone"])
-        else:
+        else:               # 尾骨骼：坐标偏移
             r.vec(3)
-        if flags & 0x0002:
+        if flags & 0x0100 or flags & 0x0200:  # 旋转付与 / 移动付与
             r.index(sizes["bone"])
             r.f32()
-        if flags & 0x0004:
-            r.index(sizes["bone"])
-            r.f32()
-        if flags & 0x0008:
+        if flags & 0x0400:  # 轴固定
             r.vec(3)
-        if flags & 0x0010:
+        if flags & 0x0800:  # 局部轴
             r.vec(6)
-        if flags & 0x0080:
+        if flags & 0x2000:  # 外部亲
             r.i32()
+        if flags & 0x0020:  # IK：目标骨骼 / 循环次数 / 单次限角 / 链接列表
+            r.index(sizes["bone"])
+            r.i32()
+            r.f32()
+            for _ in range(r.u32()):
+                r.index(sizes["bone"])
+                if r.u8() == 1:
+                    r.vec(6)
         bones.append({"name": name, "pos": pos, "parent": parent})
 
     # 变形（跳过）
@@ -199,33 +205,30 @@ def read_pmx(path: Path):
         morph_type = r.u8()
         count = r.u32()
         for _ in range(count):
-            if morph_type == 0:
+            if morph_type == 0:  # 组：形态索引 + 系数
                 r.index(sizes["morph"])
-            elif morph_type == 1:
+                r.f32()
+            elif morph_type == 1:  # 顶点：顶点索引 + 偏移
                 r.index(sizes["vertex"])
                 r.vec(3)
-            elif morph_type == 2:
+            elif morph_type == 2:  # 骨骼：骨骼索引 + 移动 + 旋转四元数
                 r.index(sizes["bone"])
                 r.vec(7)
-            elif 3 <= morph_type <= 7:
+            elif 3 <= morph_type <= 7:  # UV：顶点索引 + 4 分量偏移
                 r.index(sizes["vertex"])
                 r.vec(4)
-            elif morph_type == 8:
+            elif morph_type == 8:  # 材质：索引 + 类型 + 各分量偏移（无贴图索引）
                 r.index(sizes["material"])
-                r.u8()
+                r.i8()
                 r.vec(4)
                 r.vec(3)
                 r.f32()
                 r.vec(3)
                 r.vec(4)
                 r.f32()
-                r.index(sizes["texture"])
-                r.index(sizes["texture"])
-                r.u8()
-                r.index(sizes["texture"])
-            elif morph_type == 9:
-                r.index(sizes["morph"])
-                r.f32()
+                r.vec(4)
+                r.vec(4)
+                r.vec(4)
             else:
                 r.index(sizes["rigid"])
                 r.vec(3)
@@ -260,7 +263,7 @@ def read_pmx(path: Path):
         r.u8()
         r.index(sizes["rigid"])
         r.index(sizes["rigid"])
-        r.vec(9)
+        r.vec(24)  # 位置/旋转 + 最小最大×4 + 弹簧常数×2 = 24 个 float
 
     return {
         "version": version, "vertices": vertices, "faces": faces, "textures": textures,
@@ -268,7 +271,83 @@ def read_pmx(path: Path):
     }
 
 
-def load_image_bytes(pmx_dir: Path, rel: str):
+def prune_stray_triangles(model: dict, limit: float = 1000.0):
+    """剔除远离原点的“野三角形”（MMD 模型常见的隐藏残骸，例如猫猫女仆有 176 个 Y≈-30000 的顶点）。
+
+    保留部分重建顶点表与索引表，并按材质重新统计面数；返回剔除的三角形数量。
+    角色模型撑死几十个单位高，超出 limit 的一定是不可见的残骸。
+    """
+    vertices = model["vertices"]
+    faces = model["faces"]
+    materials = model["materials"]
+    tri_material = []
+    for mat_index, mat in enumerate(materials):
+        tri_material.extend([mat_index] * (mat["faces"] // 3))
+    keep = [max(abs(c) for c in v[0]) <= limit for v in vertices]
+    if all(keep):
+        return 0
+    remap = {}
+    pruned_vertices = []
+    for i, v in enumerate(vertices):
+        if keep[i]:
+            remap[i] = len(pruned_vertices)
+            pruned_vertices.append(v)
+    face_counts = [0] * len(materials)
+    pruned_faces = []
+    removed = 0
+    for tri, mat_index in enumerate(tri_material):
+        indices = faces[tri * 3:tri * 3 + 3]
+        if len(indices) < 3 or not all(keep[i] for i in indices):
+            removed += 1
+            continue
+        pruned_faces.extend(remap[i] for i in indices)
+        face_counts[mat_index] += 3
+    model["vertices"] = pruned_vertices
+    model["faces"] = pruned_faces
+    for mat, count in zip(materials, face_counts):
+        mat["faces"] = count
+    return removed
+
+
+def bmp_to_png(data: bytes):
+    """把无压缩 BMP（24/32 位、BI_RGB）转成 PNG 字节；其它 BMP 返回 None。
+
+    有些 MMD 模型（例如猫猫女仆的尾巴）把 .bmp 当漫反射贴图，而 glTF 只接受 PNG/JPEG。
+    """
+    if len(data) < 54 or data[:2] != b"BM":
+        return None
+    off_bits = struct.unpack_from("<I", data, 10)[0]
+    header_size = struct.unpack_from("<I", data, 14)[0]
+    width, height = struct.unpack_from("<ii", data, 18)
+    bpp = struct.unpack_from("<H", data, 28)[0]
+    compression = struct.unpack_from("<I", data, 30)[0]
+    if header_size < 40 or compression != 0 or bpp not in (24, 32) or width <= 0 or height == 0:
+        return None
+    top_down = height < 0
+    height = abs(height)
+    step = bpp // 8
+    stride = ((width * bpp + 31) // 32) * 4
+    if off_bits + stride * height > len(data):
+        return None
+    raw = bytearray()
+    for y in range(height):
+        src = off_bits + (y if top_down else height - 1 - y) * stride
+        raw.append(0)  # PNG 行过滤：None
+        for x in range(width):
+            p = src + x * step
+            raw += bytes((data[p + 2], data[p + 1], data[p], 255))  # BMP 是 BGR(A)
+
+    def chunk(tag, payload):
+        return struct.pack(">I", len(payload)) + tag + payload + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 6))
+            + chunk(b"IEND", b""))
+
+
+def resolve_texture_path(pmx_dir: Path, rel: str):
+    """把 PMX 里的贴图相对路径解析成实际文件；找不到时按文件名在模型目录里兜底搜索。"""
     clean = rel.replace("\\", "/").lstrip("/")
     candidate = pmx_dir / clean
     if not candidate.exists():
@@ -276,7 +355,12 @@ def load_image_bytes(pmx_dir: Path, rel: str):
         for found in pmx_dir.rglob(Path(clean).name):
             candidate = found
             break
-    if not candidate.exists():
+    return candidate if candidate.exists() else None
+
+
+def load_image_bytes(pmx_dir: Path, rel: str):
+    candidate = resolve_texture_path(pmx_dir, rel)
+    if candidate is None:
         return None, None
     data = candidate.read_bytes()
     suffix = candidate.suffix.lower()
@@ -286,6 +370,9 @@ def load_image_bytes(pmx_dir: Path, rel: str):
             mime = "image/png"
         elif data[:3] == b"\xff\xd8\xff":
             mime = "image/jpeg"
+        elif suffix == ".bmp" or data[:2] == b"BM":
+            data = bmp_to_png(data)
+            mime = "image/png" if data else None
     return data, mime
 
 
@@ -344,7 +431,7 @@ def pack_glb(model: dict, pmx_dir: Path, out_path: Path):
     use_u32 = len(vertices) > 65535
     primitives = []
     cursor = 0
-    for mat in model["materials"]:
+    for mat_index, mat in enumerate(model["materials"]):
         count = mat["faces"]
         chunk = faces[cursor:cursor + count]
         cursor += count
@@ -357,7 +444,7 @@ def pack_glb(model: dict, pmx_dir: Path, out_path: Path):
             data = struct.pack("<%dH" % len(chunk), *chunk)
             comp = COMP_U16
         acc = add_accessor(add_view(data, TARGET_ELEMENT), comp, len(chunk), "SCALAR")
-        primitives.append({"material": len(primitives), "attributes": {
+        primitives.append({"material": mat_index, "attributes": {
             "POSITION": pos_acc, "NORMAL": nrm_acc, "TEXCOORD_0": uv_acc,
             "JOINTS_0": joint_acc, "WEIGHTS_0": weight_acc,
         }, "indices": acc})
@@ -366,6 +453,7 @@ def pack_glb(model: dict, pmx_dir: Path, out_path: Path):
     gltf_materials = []
     images = []
     gltf_textures = []
+    texture_cache = {}  # 实际贴图文件路径 -> glTF texture 索引（同一张图只内嵌一次，避免 glb 膨胀）
     samplers = [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}]
     for mat in model["materials"]:
         entry = {
@@ -381,12 +469,17 @@ def pack_glb(model: dict, pmx_dir: Path, out_path: Path):
             entry["alphaMode"] = "BLEND"
         tex_index = mat["texture"]
         if 0 <= tex_index < len(model["textures"]):
-            data, mime = load_image_bytes(pmx_dir, model["textures"][tex_index])
-            if data and mime:
-                view = add_view(data)
-                images.append({"bufferView": view, "mimeType": mime, "name": Path(model["textures"][tex_index]).name})
-                gltf_textures.append({"source": len(images) - 1, "sampler": 0})
-                entry["pbrMetallicRoughness"]["baseColorTexture"] = {"index": len(gltf_textures) - 1}
+            resolved = resolve_texture_path(pmx_dir, model["textures"][tex_index])
+            cache_key = str(resolved) if resolved is not None else model["textures"][tex_index]
+            if cache_key not in texture_cache:
+                data, mime = load_image_bytes(pmx_dir, model["textures"][tex_index])
+                if data and mime:
+                    view = add_view(data)
+                    images.append({"bufferView": view, "mimeType": mime, "name": Path(model["textures"][tex_index]).name})
+                    gltf_textures.append({"source": len(images) - 1, "sampler": 0})
+                    texture_cache[cache_key] = len(gltf_textures) - 1
+            if cache_key in texture_cache:
+                entry["pbrMetallicRoughness"]["baseColorTexture"] = {"index": texture_cache[cache_key]}
         gltf_materials.append(entry)
 
     # 骨骼节点 + 逆绑定矩阵
@@ -486,7 +579,10 @@ def main():
     model = read_pmx(pmx)
     if model["end"] != model["size"]:
         print("[pmx2glb] 警告：解析结束位置 %d != 文件大小 %d（格式可能有出入）" % (model["end"], model["size"]))
-    name = pmx.stem
+    stray = prune_stray_triangles(model)
+    if stray:
+        print("[pmx2glb] 已剔除 %d 个远离原点的野三角形（隐藏残骸，会让包围盒虚大）" % stray)
+    name = sys.argv[3] if len(sys.argv) > 3 else pmx.stem
     safe = "".join(ch for ch in name if ch.isascii() and (ch.isalnum() or ch in "._- ")).strip() or "model"
     out_path = out_dir / ("%s.glb" % safe)
     stats = pack_glb(model, pmx.parent, out_path)
