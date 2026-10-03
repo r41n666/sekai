@@ -26,7 +26,9 @@
 模型管线要点（`scripts/entities/miku_model.gd`、`miku_procedural_pose.gd`）：
 - 自动加载 `assets/models/miku/miku.glb`；按骨骼范围自动缩放到 1.75 m、脚底对齐胶囊底；
 - 自动清理 mmd_tools 导出混进来的物理刚体/关节占位网格（否则是白盒子）；
-- 模型正面约定为 **+Z**（不对就用 `yaw_offset_deg` 修正）；
+- 模型正面约定为 **+Z**、**右手在 -X**（不对就用 `yaw_offset_deg` 修正；PMX 转 glb 的左右问题见 README「PMX → glb 转换」——PMX 是左手系，必须镜像 Z 而不是旋转，否则模型左右反、枪挂到「左手」）；
+- 武器挂点 `WeaponMount` 始终留在 `MikuModel` 下、每帧跟右手骨骼（第三人称不悬空）；第一人称（`V`）时武器改为贴相机显示；
+- 武器皮肤 + Esc 菜单 3D 检视见 `scripts/shooting/weapon_skin.gd`、`scripts/ui/weapon_preview.gd`；
 - 模型没有动画剪辑时自动启用**程序化步态**：屈膝抬脚、摆臂、身体起伏、步频按速度自适应（防滑步）；
   实现用 `set_bone_global_pose_override` + **逐级枢轴累积**（多个绝对覆写会打断父子链，必须按关节枢轴逐级叠加）；
   骨骼识别是启发式的（脚→大腿→膝→踝、手→上臂→肘沿父链定位，骨骼名乱码也能用）。
@@ -36,8 +38,10 @@
 > 本轮已完成：**任务 A**（PMX→glb 转换器修复 + 3 个 MMD 模型接入）与 **任务 B**（Esc 菜单 / 死亡重生 / H 人机）。
 > 下面保留原始需求作为记录。
 >
-> 追加：**真实武器模型**（M4A4 / 粉色 USP / 青花瓷手雷）已从 `feat-add-new-model-vm4GuF` 移植进 master（含 `tools/obj2glb.py`）；
-> 蝴蝶刀仍是方块占位——模型在开发机 `D:\sekai\assets\models\hudidao`（尚未进仓库），接入方式与其它武器一致（见 README「武器与装备槽」）。
+> 追加：**真实武器模型**（M4A4 / 粉色 USP / 青花瓷手雷 / 蝴蝶刀）已接入 master（含 `tools/obj2glb.py`）；
+> 蝴蝶刀（`assets/models/weapons/butterfly_knife.glb`）已替换掉方块占位；
+> 另有：武器皮肤（程序化贴图）+ Esc 菜单 3D 检视 + 第一人称武器视图模型 + 第三人称握持跟手 + PMX 左右镜像修复，
+> 细节与验证记录见 README「阶段 2 / 4 补充」。
 
 ### 任务 A：修复 `tools/pmx2glb.py`（已完成）
 
