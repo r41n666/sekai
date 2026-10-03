@@ -7,8 +7,9 @@
 ## 一、项目背景
 
 这是一个 **Godot 4 的第三人称射击原型**（主角：初音未来，复刻 sky.jpeg 的白云蓝天 + 水面场景）。
-- 仓库：https://github.com/r41n666/sekai ，工作分支 **branch-7TXhiN**（= 最新提交）
-- 本地准备：`git clone https://github.com/r41n666/sekai.git && cd sekai && git checkout branch-7TXhiN`
+- 仓库：https://github.com/r41n666/sekai ，工作分支 **master**（= 最新提交）
+- 本地准备：`git clone https://github.com/r41n666/sekai.git && cd sekai && git checkout master && git pull`
+- 另一条分支 `feat-add-new-model-vm4GuF` 是更早的真实武器模型改版，其内容（M4A4 / 粉色 USP / 青花瓷手雷 + `tools/obj2glb.py`）已移植进 master；master 上还多了菜单 / 重生 / 人机系统，**以 master 为准**
 - 用 **Godot 4.7.2**（≥4.3 均可）打开 `project.godot`
 - **先完整读 `README.md`**：它是权威文档（阶段进度表、项目结构、操作说明、验证记录、已知限制）。每次改完功能必须同步更新它。
 
@@ -34,6 +35,9 @@
 
 > 本轮已完成：**任务 A**（PMX→glb 转换器修复 + 3 个 MMD 模型接入）与 **任务 B**（Esc 菜单 / 死亡重生 / H 人机）。
 > 下面保留原始需求作为记录。
+>
+> 追加：**真实武器模型**（M4A4 / 粉色 USP / 青花瓷手雷）已从 `feat-add-new-model-vm4GuF` 移植进 master（含 `tools/obj2glb.py`）；
+> 蝴蝶刀仍是方块占位——模型在开发机 `D:\sekai\assets\models\hudidao`（尚未进仓库），接入方式与其它武器一致（见 README「武器与装备槽」）。
 
 ### 任务 A：修复 `tools/pmx2glb.py`（已完成）
 

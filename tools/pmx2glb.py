@@ -5,7 +5,7 @@
 骨骼层级、按材质分组的索引、漫反射贴图（内嵌进 glb）。
 忽略：变形(morph)/显示枠/物理刚体/关节/附加 UV（不影响静态外观）。
 
-坐标保持 PMX 原样（Y 上，模型面向 +Z，和本项目约定一致；身高由 Godot 侧自动适配）。
+坐标：Y 上；PMX 原文件模型面朝 -Z，转换时统一绕 Y 轴旋转 180° 对齐项目约定（模型正面 +Z）；身高由 Godot 侧自动适配。
 
 用法：python tools/pmx2glb.py <model.pmx> <out_dir> [out_name]
 """
@@ -269,6 +269,19 @@ def read_pmx(path: Path):
         "version": version, "vertices": vertices, "faces": faces, "textures": textures,
         "materials": materials, "bones": bones, "end": r.o, "size": len(r.d),
     }
+
+
+def face_positive_z(model: dict) -> None:
+    """把模型绕 Y 轴旋转 180°。
+
+    PMX 模型在原文件里面朝 -Z（用「右足首 → 右つま先」的骨骼位置就能验证：脚尖在足首的 -Z 方向），
+    而本项目约定模型正面朝 +Z（player.gd 的转向基准、miku.glb 也是 +Z）。
+    """
+    for pos, normal, _uv, _bones, _weights in model["vertices"]:
+        pos[0], pos[2] = -pos[0], -pos[2]
+        normal[0], normal[2] = -normal[0], -normal[2]
+    for bone in model["bones"]:
+        bone["pos"][0], bone["pos"][2] = -bone["pos"][0], -bone["pos"][2]
 
 
 def prune_stray_triangles(model: dict, limit: float = 1000.0):
@@ -582,6 +595,7 @@ def main():
     stray = prune_stray_triangles(model)
     if stray:
         print("[pmx2glb] 已剔除 %d 个远离原点的野三角形（隐藏残骸，会让包围盒虚大）" % stray)
+    face_positive_z(model) # PMX 面朝 -Z → 统一翻成项目约定的 +Z
     name = sys.argv[3] if len(sys.argv) > 3 else pmx.stem
     safe = "".join(ch for ch in name if ch.isascii() and (ch.isalnum() or ch in "._- ")).strip() or "model"
     out_path = out_dir / ("%s.glb" % safe)

@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://dbw8vpfutktc0"
-path="res://.godot/imported/miku_maid.glb-708e91ddc1ccd532dfeb6b4d635351ad.scn"
+uid="uid://btf6p7jbvyjyl"
+path="res://.godot/imported/m4a4.glb-920942efea0ec43d6a632473df723990.scn"
 
 [deps]
 
-source_file="res://assets/models/miku_maid/miku_maid.glb"
-dest_files=["res://.godot/imported/miku_maid.glb-708e91ddc1ccd532dfeb6b4d635351ad.scn"]
+source_file="res://assets/models/weapons/m4a4.glb"
+dest_files=["res://.godot/imported/m4a4.glb-920942efea0ec43d6a632473df723990.scn"]
 
 [params]
 

@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://dbw8vpfutktc0"
-path="res://.godot/imported/miku_maid.glb-708e91ddc1ccd532dfeb6b4d635351ad.scn"
+uid="uid://ci6onjv5qa1qm"
+path="res://.godot/imported/porcelain_grenade.glb-f5254b92d43473ac975b7dc28c2ac376.scn"
 
 [deps]
 
-source_file="res://assets/models/miku_maid/miku_maid.glb"
-dest_files=["res://.godot/imported/miku_maid.glb-708e91ddc1ccd532dfeb6b4d635351ad.scn"]
+source_file="res://assets/models/weapons/porcelain_grenade.glb"
+dest_files=["res://.godot/imported/porcelain_grenade.glb-f5254b92d43473ac975b7dc28c2ac376.scn"]
 
 [params]
 

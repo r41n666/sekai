@@ -255,24 +255,49 @@ func _fit_to_capsule(model: Node) -> void:
 	model_3d.position += position_offset
 
 
-## 估算模型在 MikuModel 局部空间里的包围盒：有骨骼就用骨骼位置（蒙皮网格的 AABB 不可靠），否则用网格 AABB
+## 估算模型在 MikuModel 局部空间里的包围盒。
+## 网格 AABB 与骨骼位置各算一份、取「更矮」的那份：
+## - 有的 PMX（小海军初音）把物理骨骼丢在离身体很远的位置（前髪先 Y=-74、パンツ Y=+100），
+##   只按骨骼量会把身高量成 155 单位 → 自动缩放后模型缩成一个玩偶（人机随机选中时肉眼可见）；
+## - 蒙皮网格的 AABB 在 Godot 里是静止姿态的，个别模型不一定准，所以两条路都留着兜底。
 func _measure_bounds(model: Node) -> AABB:
+	var mesh_bounds := _measure_mesh_bounds(model)
+	var bone_bounds := _measure_bone_bounds(model)
+	if mesh_bounds.size.y <= 0.001:
+		return bone_bounds
+	if bone_bounds.size.y <= 0.001:
+		return mesh_bounds
+	return mesh_bounds if mesh_bounds.size.y <= bone_bounds.size.y else bone_bounds
+
+
+## 网格 AABB（静止姿态）：把 8 个角点换算到 MikuModel 局部空间
+func _measure_mesh_bounds(model: Node) -> AABB:
 	var points: Array[Vector3] = []
+	for mesh in _collect_meshes(model):
+		var box: AABB = mesh.get_aabb()
+		for corner_idx in 8:
+			var corner := box.position + Vector3(
+				box.size.x * (corner_idx & 1),
+				box.size.y * ((corner_idx >> 1) & 1),
+				box.size.z * ((corner_idx >> 2) & 1)
+			)
+			points.append(global_transform.affine_inverse() * (mesh.global_transform * corner))
+	return _bounds_of(points)
+
+
+## 骨骼位置的包围盒（没有骨骼时返回空 AABB）
+func _measure_bone_bounds(model: Node) -> AABB:
 	var skeleton := _find_skeleton(model)
-	if skeleton != null:
-		for bone_idx in skeleton.get_bone_count():
-			var world_point: Vector3 = skeleton.global_transform * skeleton.get_bone_global_pose(bone_idx).origin
-			points.append(global_transform.affine_inverse() * world_point)
-	else:
-		for mesh in _collect_meshes(model):
-			var box: AABB = mesh.get_aabb()
-			for corner_idx in 8:
-				var corner := box.position + Vector3(
-					box.size.x * (corner_idx & 1),
-					box.size.y * ((corner_idx >> 1) & 1),
-					box.size.z * ((corner_idx >> 2) & 1)
-				)
-				points.append(global_transform.affine_inverse() * (mesh.global_transform * corner))
+	if skeleton == null:
+		return AABB()
+	var points: Array[Vector3] = []
+	for bone_idx in skeleton.get_bone_count():
+		var world_point: Vector3 = skeleton.global_transform * skeleton.get_bone_global_pose(bone_idx).origin
+		points.append(global_transform.affine_inverse() * world_point)
+	return _bounds_of(points)
+
+
+func _bounds_of(points: Array[Vector3]) -> AABB:
 	if points.is_empty():
 		return AABB()
 	var result := AABB(points[0], Vector3.ZERO)
