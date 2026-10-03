@@ -126,6 +126,8 @@ func _setup_local_player() -> void:
 	_recoil.add_to_group("recoil")
 	_camera.add_to_group("camera")
 	_camera.current = true
+	# 第一人称（V）时武器贴着这台相机显示，做成「手持视角模型」
+	_model.view_camera = _camera
 	capture_mouse()
 	_equip_slot("Rifle")
 	health_changed.emit(health, max_health)
@@ -320,6 +322,7 @@ func _rotate_camera(relative: Vector2) -> void:
 ## 由武器调用：切换开镜状态（影响移动速度与鼠标灵敏度）
 func set_aiming(aiming: bool) -> void:
 	_aiming = aiming
+	_model.set_view_aiming(aiming) # 第一人称下武器跟着收进画面中心
 
 
 func is_aiming() -> bool:
@@ -413,9 +416,21 @@ func _equip_slot(slot: String) -> void:
 		(next as Node3D).visible = true
 		if next.has_method("set_active"):
 			next.set_active(true)
+		if next.has_method("apply_skin") and is_multiplayer_authority():
+			next.apply_skin(WeaponSkin.get_selected(slot)) # 用 Esc 菜单里选的皮肤
 		if is_multiplayer_authority():
 			next.add_to_group("weapon") # HUD 查找用
+	# 抬手 / 放手：持械时模型右手抬到身前（程序化姿态），武器才不垂在腿边
+	_model.set_holding_weapon(next != null)
 	weapon_changed.emit(_current_weapon)
+
+
+## 由 Esc 菜单调用：切换某个武器槽的皮肤并立即生效（只影响本端）
+func set_weapon_skin(slot: String, skin_id: String) -> void:
+	WeaponSkin.set_selected(slot, skin_id)
+	var weapon: Node = _weapons.get(slot)
+	if weapon != null and weapon.has_method("apply_skin"):
+		weapon.apply_skin(skin_id)
 
 
 func capture_mouse() -> void:

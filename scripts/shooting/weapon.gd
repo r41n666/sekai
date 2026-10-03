@@ -46,6 +46,12 @@ signal hit_confirmed(target_name: String, killed: bool)
 @export var shake_per_shot := 0.28
 @export var impact_flash_time := 0.07
 
+@export_group("第一人称 / 皮肤")
+## 第一人称（V）时武器相对相机的摆放（相机空间；不填就用 MikuModel 的默认值）
+@export var view_offset := Vector3(0.17, -0.17, -0.55)
+## 第一人称时相对相机的偏航（度；武器模型正面朝 +Z，180 = 对准镜头前方）
+@export var view_yaw_deg := 180.0
+
 @onready var _muzzle: Marker3D = $Muzzle
 @onready var _muzzle_light: OmniLight3D = $MuzzleLight
 @onready var _muzzle_flash: MeshInstance3D = $MuzzleFlash
@@ -107,6 +113,11 @@ func set_active(value: bool) -> void:
 		return
 	_trigger_held = false
 	_cancel_aim()
+
+
+## 套用武器皮肤（Esc 菜单 / player.gd 装备时调用；空 id = 原版）
+func apply_skin(skin_id: String) -> void:
+	WeaponSkin.apply_to(self, skin_id)
 
 
 ## 取消开镜（收起武器 / 释放鼠标时调用）

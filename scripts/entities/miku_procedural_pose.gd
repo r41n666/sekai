@@ -31,6 +31,11 @@ const JUMP_LEG_DEG := 14.0
 const JUMP_KNEE_DEG := 30.0
 const JUMP_ARM_DOWN_DEG := 42.0
 const ARM_DOWN_DEG := 66.0      # 站立时从 T-pose 放下来
+## 端着武器时右手的姿态（空手时手臂自然垂下，持械时右手抬到身前，武器才不垂在腿边）
+const HOLD_ARM_DOWN_DEG := 34.0     # 右侧上臂下垂角度（比空手小 = 抬起来）
+const HOLD_ARM_FORWARD_DEG := 58.0  # 右侧上臂向前抬
+const HOLD_ELBOW_DEG := 62.0        # 持械侧肘部弯曲
+const HOLD_SWING_SCALE := 0.25      # 持械侧摆臂幅度（端着东西时几乎不甩）
 const SMOOTH_SPEED := 10.0
 const HIP_RATIO := 0.42
 const ARM_MIN_RATIO := 0.60
@@ -72,12 +77,20 @@ var _arm_l := -1
 var _elbow_r := -1
 var _elbow_l := -1
 var _center := -1
+## 上臂「放下」的旋转方向：取决于这条胳膊在骨架的哪一侧
+## （正常模型右臂在 -X 侧；PMX 转出来的模型左右镜像，右臂在 +X 侧，符号要反过来）
+var _down_sign_r := 1.0
+var _down_sign_l := -1.0
 
 var _phase := 0.0
 var _leg_amplitude := 0.0    # 当前大腿摆幅（弧度，平滑）
 var _knee_amplitude := 0.0
 var _arm_swing := 0.0
 var _arm_down := ARM_DOWN_DEG
+## 是否端着武器（由 MikuModel.set_holding_weapon 设置）
+var holding_weapon := false
+var _hold_forward := 0.0     # 持械时上臂前抬角（平滑，弧度）
+var _hold_elbow := ELBOW_BEND_DEG
 var _lean := 0.0
 var _bob := 0.0
 var _bob_offset := Vector3.ZERO
@@ -168,6 +181,8 @@ func setup(skeleton: Skeleton3D, reference: Node3D) -> bool:
 		_leg_length = _height * 0.5
 
 	valid = (_thigh_r >= 0 or _thigh_l >= 0) and _leg_length > 0.001
+	_down_sign_r = _down_sign(_arm_r)
+	_down_sign_l = _down_sign(_arm_l) if _arm_l >= 0 else -_down_sign_r
 	_controlled = [_thigh_r, _thigh_l, _knee_r, _knee_l, _ankle_r, _ankle_l,
 		_arm_r, _arm_l, _elbow_r, _elbow_l, _center]
 	debug_names = {
@@ -207,11 +222,20 @@ func update(delta: float, speed_mps: float, moving: bool, running: bool, on_floo
 		var leg_world := _leg_length * _model_scale
 		var stride := 4.0 * leg_world * sin(leg_target)
 		frequency_target = clampf(speed_mps / maxf(stride, 0.25), 0.8, 3.0)
+	# 端着武器：右手抬到身前（手臂垂下的话武器会挂在腿边，看起来像掉在地上）
+	var hold_forward_target := 0.0
+	var hold_elbow_target := ELBOW_BEND_DEG
+	if holding_weapon:
+		down_target = minf(down_target, HOLD_ARM_DOWN_DEG)
+		hold_forward_target = HOLD_ARM_FORWARD_DEG
+		hold_elbow_target = HOLD_ELBOW_DEG
 	var k := 1.0 - exp(-SMOOTH_SPEED * delta)
 	_leg_amplitude = lerpf(_leg_amplitude, leg_target, k)
 	_knee_amplitude = lerpf(_knee_amplitude, knee_target, k)
 	_arm_swing = lerpf(_arm_swing, arm_target, k)
 	_arm_down = lerpf(_arm_down, down_target, k)
+	_hold_forward = lerpf(_hold_forward, deg_to_rad(hold_forward_target), k)
+	_hold_elbow = lerpf(_hold_elbow, hold_elbow_target, k)
 	_lean = lerpf(_lean, lean_target, k)
 	frequency = lerpf(frequency, frequency_target, k)
 	_phase = fmod(_phase + delta * TAU * frequency, TAU)
@@ -237,7 +261,8 @@ func _apply_pose() -> void:
 	_bob = -BOB_UNITS * cos(_phase * 2.0) * (_leg_amplitude / maxf(deg_to_rad(WALK_LEG_DEG), 0.001))
 	_bob_offset = _up * _bob
 	var down := deg_to_rad(_arm_down)
-	var arm_swing_r := -_arm_swing * cos(theta_r)
+	var swing_scale := HOLD_SWING_SCALE if holding_weapon else 1.0
+	var arm_swing_r := -_arm_swing * swing_scale * cos(theta_r) + _hold_forward
 	var arm_swing_l := -_arm_swing * cos(theta_l)
 	var elbow := deg_to_rad(ELBOW_BEND_DEG)
 
@@ -249,8 +274,8 @@ func _apply_pose() -> void:
 
 	_pose_leg(_thigh_r, _knee_r, _ankle_r, base, thigh_r, knee_r, ankle_r)
 	_pose_leg(_thigh_l, _knee_l, _ankle_l, base, thigh_l, knee_l, ankle_l)
-	_pose_arm(_arm_r, _elbow_r, base, arm_swing_r, down, elbow)
-	_pose_arm(_arm_l, _elbow_l, base, arm_swing_l, -down, elbow)
+	_pose_arm(_arm_r, _elbow_r, base, arm_swing_r, down * _down_sign_r, _hold_elbow)
+	_pose_arm(_arm_l, _elbow_l, base, arm_swing_l, down * _down_sign_l, elbow)
 
 
 ## 腿链：大腿 → 膝盖 → 脚踝逐级累积（脚踝以下由引擎自然跟随）
@@ -456,3 +481,10 @@ func _axis_distance(p: Vector3) -> float:
 
 func _name_of(idx: int) -> String:
 	return _skeleton.get_bone_name(idx) if idx >= 0 else "-"
+
+
+## 上臂「放下」旋转的符号：骨在骨架的右半侧（-X 侧）为 +1，镜像模型（+X 侧）为 -1
+func _down_sign(arm_idx: int) -> float:
+	if arm_idx < 0:
+		return 1.0
+	return 1.0 if _skeleton.get_bone_global_rest(arm_idx).origin.dot(_right) > 0.0 else -1.0

@@ -9,6 +9,10 @@ signal hit_confirmed(target_name: String, killed: bool)
 @export var damage := 65.0
 @export var range_m := 2.2
 @export var swing_time := 0.22
+## 第一人称（V）时武器相对相机的摆放（相机空间；刀短，比枪贴近镜头一些）
+@export var view_offset := Vector3(0.16, -0.15, -0.32)
+## 第一人称时相对相机的偏航（度；武器模型正面朝 +Z，180 = 对准镜头前方）
+@export var view_yaw_deg := 180.0
 
 var active := true
 var _player: CharacterBody3D
@@ -33,6 +37,11 @@ func set_trigger_enabled(_enabled: bool) -> void:
 
 func set_active(value: bool) -> void:
 	active = value
+
+
+## 套用武器皮肤（Esc 菜单 / player.gd 装备时调用；空 id = 原版）
+func apply_skin(skin_id: String) -> void:
+	WeaponSkin.apply_to(self, skin_id)
 
 
 func _process(delta: float) -> void:

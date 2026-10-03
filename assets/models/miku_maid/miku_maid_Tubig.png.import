@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cwex5co2u71fv"
-path="res://.godot/imported/miku_maid_Tubig.png-83bc0b09da7426ebd469534bc402eb7b.ctex"
+path.s3tc="res://.godot/imported/miku_maid_Tubig.png-83bc0b09da7426ebd469534bc402eb7b.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "22bd9c7aae5553f4bc73032cdec53ba4"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/miku_maid/miku_maid_Tubig.png"
-dest_files=["res://.godot/imported/miku_maid_Tubig.png-83bc0b09da7426ebd469534bc402eb7b.ctex"]
+dest_files=["res://.godot/imported/miku_maid_Tubig.png-83bc0b09da7426ebd469534bc402eb7b.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0
