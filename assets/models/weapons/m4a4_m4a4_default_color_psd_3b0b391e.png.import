@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://c5t4lhr3e66hq"
-path="res://.godot/imported/m4a4_m4a4_default_color_psd_3b0b391e.png-699934384557cf74f9445eb5a72948f2.ctex"
+path.s3tc="res://.godot/imported/m4a4_m4a4_default_color_psd_3b0b391e.png-699934384557cf74f9445eb5a72948f2.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "112c498d2b0da1673948f98aab6c8abb"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/weapons/m4a4_m4a4_default_color_psd_3b0b391e.png"
-dest_files=["res://.godot/imported/m4a4_m4a4_default_color_psd_3b0b391e.png-699934384557cf74f9445eb5a72948f2.ctex"]
+dest_files=["res://.godot/imported/m4a4_m4a4_default_color_psd_3b0b391e.png-699934384557cf74f9445eb5a72948f2.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0
