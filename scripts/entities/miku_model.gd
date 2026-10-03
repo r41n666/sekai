@@ -68,13 +68,18 @@ func _apply_model_visibility() -> void:
 		(_loaded_model as Node3D).visible = not _first_person
 
 
-## 扫描 res://assets/models/<子目录>/*.glb，返回可用模型路径（Esc 菜单的角色选择、人机随机外观都用它）
+## 扫描 res://assets/models/<子目录>/*.glb，返回可用角色模型（Esc 菜单的角色选择、人机随机外观都用它）。
+## 注意：武器模型也放在 assets/models/weapons/ 下，但它不是角色，要跳过（否则人机会随机变成一把枪）。
+const MODEL_DIR_IGNORE := ["weapons"]
+
 static func list_available_models() -> Array[String]:
 	var paths: Array[String] = []
 	var root := DirAccess.open("res://assets/models")
 	if root == null:
 		return paths
 	for sub in root.get_directories():
+		if sub.to_lower() in MODEL_DIR_IGNORE:
+			continue
 		var dir := DirAccess.open("res://assets/models/%s" % sub)
 		if dir == null:
 			continue
