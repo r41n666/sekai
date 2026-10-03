@@ -196,7 +196,7 @@ grow_vertical = 0
 mouse_filter = 2
 theme_override_colors/font_color = Color(0.7, 0.85, 0.95, 0.55)
 theme_override_font_sizes/font_size = 13
-text = "WASD 移动 | Space 跳跃 | Ctrl 蹲 / Z 趴 | 左键开火 | 右键开镜 | R 换弹（长按 3 秒补满） | 1~4 武器（同键再按=空手） | V 第一/第三人称 | Alt 自由视角 | Esc 释放鼠标 | N/P 音乐"
+text = "WASD 移动 | Space 跳跃 | Ctrl 蹲 / Z 趴 | 左键开火 | 右键开镜 | R 换弹（长按 3 秒补满） | 1~4 武器（同键再按=空手） | V 第一/第三人称 | Alt 自由视角 | Esc 菜单 | H 人机 | N/P 音乐"
 
 [node name="LeaveButton" type="Button" parent="."]
 anchors_preset = 1

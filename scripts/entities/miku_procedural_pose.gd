@@ -38,8 +38,13 @@ const ARM_INNER_RATIO := 0.04
 const MAX_CHAIN_STEPS := 8
 
 const HELPER_KEYWORDS := [
-	"collider", "dummy", "shadow", "rigid", "joint", "hair", "skirt", "ribbon", "offset", "end"
+	"collider", "dummy", "shadow", "rigid", "joint", "hair", "skirt", "ribbon", "offset", "end",
+	"リボン", "スカート", "髪", "影"
 ]
+## 按名字找骨骼时的排除词（IK / 親 / 先 等辅助骨骼）
+const NAME_EXCLUDE_LIMB := ["ik", "ｉｋ", "親", "先", "end"]
+const NAME_EXCLUDE_THIGH := ["ik", "ｉｋ", "親", "先", "首", "ひざ", "膝", "end"]
+const NAME_EXCLUDE_ARM := ["ik", "ｉｋ", "親", "先", "ひじ", "肘", "手首", "end"]
 
 var valid := false
 var debug_names := {}
@@ -111,18 +116,48 @@ func setup(skeleton: Skeleton3D, reference: Node3D) -> bool:
 	_height = maxf(max_h - min_h, 0.001)
 	_axis_plane = positions[0].dot(_up)
 
-	_thigh_r = _find_thigh(positions, -1)
-	_thigh_l = _find_thigh(positions, 1)
-	_arm_r = _find_arm(positions, -1)
-	_arm_l = _find_arm(positions, 1)
+	# 1) 先按标准 MMD / 人形骨骼名找（PMX 转换过来的模型骨骼名是正常日文名，比启发式准）
+	_thigh_r = _find_by_names(["右足"], NAME_EXCLUDE_THIGH)
+	_thigh_l = _find_by_names(["左足"], NAME_EXCLUDE_THIGH)
+	_knee_r = _find_by_names(["右ひざ", "右膝"], NAME_EXCLUDE_LIMB)
+	_knee_l = _find_by_names(["左ひざ", "左膝"], NAME_EXCLUDE_LIMB)
+	_ankle_r = _find_by_names(["右足首"], NAME_EXCLUDE_LIMB)
+	_ankle_l = _find_by_names(["左足首"], NAME_EXCLUDE_LIMB)
+	_arm_r = _find_by_names(["右腕"], NAME_EXCLUDE_ARM)
+	_arm_l = _find_by_names(["左腕"], NAME_EXCLUDE_ARM)
+	_elbow_r = _find_by_names(["右ひじ", "右肘"], NAME_EXCLUDE_LIMB)
+	_elbow_l = _find_by_names(["左ひじ", "左肘"], NAME_EXCLUDE_LIMB)
+	_center = _find_by_names(["腰", "センター", "下半身"], [])
 
-	_knee_r = _child_chain(_thigh_r, 0)
-	_ankle_r = _child_chain(_thigh_r, 1)
-	_knee_l = _child_chain(_thigh_l, 0)
-	_ankle_l = _child_chain(_thigh_l, 1)
-	_elbow_r = _find_elbow(_arm_r)
-	_elbow_l = _find_elbow(_arm_l)
-	_center = _find_common_ancestor(_thigh_r, _arm_r)
+	# 2) 名字对不上（例如 miku.glb 的骨骼名是乱码）再回退到启发式
+	if _thigh_r < 0:
+		_thigh_r = _find_thigh(positions, -1)
+	if _thigh_l < 0:
+		_thigh_l = _find_thigh(positions, 1)
+	if _arm_r < 0:
+		_arm_r = _find_arm(positions, -1)
+	if _arm_l < 0:
+		_arm_l = _find_arm(positions, 1)
+
+	if _knee_r < 0:
+		_knee_r = _child_chain(_thigh_r, 0)
+	if _ankle_r < 0:
+		_ankle_r = _child_chain(_thigh_r, 1)
+	if _knee_l < 0:
+		_knee_l = _child_chain(_thigh_l, 0)
+	if _ankle_l < 0:
+		_ankle_l = _child_chain(_thigh_l, 1)
+	if _elbow_r < 0:
+		_elbow_r = _find_elbow(_arm_r)
+	if _elbow_l < 0:
+		_elbow_l = _find_elbow(_arm_l)
+	# 起伏 / 前倾的参考骨骼：优先「大腿根与上臂的共同祖先」，找不到就退到两侧大腿的共同祖先
+	if _center < 0:
+		_center = _find_common_ancestor(_thigh_r, _arm_r)
+	if _center < 0:
+		_center = _find_common_ancestor(_thigh_r, _thigh_l)
+	if _center < 0:
+		_center = _thigh_r
 	if _thigh_r >= 0:
 		var toe := _child_chain(_thigh_r, 2)
 		if toe >= 0:
@@ -254,13 +289,40 @@ func _pivot_at(pivot: Vector3, basis: Basis) -> Transform3D:
 	return Transform3D(basis, pivot - basis * pivot)
 
 
-## 绕骨骼自己的 rest 原点旋转
+## 绕骨骼自己的 rest 原点旋转（idx < 0 时退化为绕骨架原点，见 _pivot_at）
 func _pivot(idx: int, basis: Basis) -> Transform3D:
+	if idx < 0:
+		return Transform3D(basis, Vector3.ZERO)
 	return _pivot_at(_skeleton.get_bone_global_rest(idx).origin, basis)
 
 
 func _override(idx: int, transform: Transform3D) -> void:
+	if idx < 0:
+		return
 	_skeleton.set_bone_global_pose_override(idx, transform, 1.0, true)
+
+
+## 按骨骼名找骨骼：先完全匹配，再「包含」匹配（排除 IK / 親 / 先 之类的辅助骨骼）
+func _find_by_names(names: Array, exclude: Array) -> int:
+	for target in names:
+		var wanted := String(target).to_lower().strip_edges()
+		for i in _skeleton.get_bone_count():
+			if _skeleton.get_bone_name(i).to_lower().strip_edges() == wanted:
+				return i
+	for target in names:
+		var wanted := String(target).to_lower().strip_edges()
+		for i in _skeleton.get_bone_count():
+			var bone_name := _skeleton.get_bone_name(i).to_lower()
+			if not bone_name.contains(wanted):
+				continue
+			var blocked := false
+			for bad in exclude:
+				if bone_name.contains(String(bad).to_lower()):
+					blocked = true
+					break
+			if not blocked:
+				return i
+	return -1
 
 
 ## 沿子链取第 n 个子骨骼（0=第一个子级）

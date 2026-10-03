@@ -1,0 +1,64 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/game_menu.gd" id="1_menu"]
+
+[node name="GameMenu" type="CanvasLayer"]
+layer = 2
+visible = false
+script = ExtResource("1_menu")
+
+[node name="Dim" type="ColorRect" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.04, 0.07, 0.6)
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -280.0
+offset_top = -240.0
+offset_right = 280.0
+offset_bottom = 240.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 30
+text = "菜单"
+horizontal_alignment = 1
+
+[node name="ModelLabel" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.88, 0.95, 0.9)
+theme_override_font_sizes/font_size = 15
+text = "角色模型（点击切换本地玩家模型）"
+
+[node name="ModelList" type="VBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 4
+
+[node name="HintLabel" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.85, 0.95, 0.6)
+theme_override_font_sizes/font_size = 13
+text = "菜单打开时会释放鼠标并屏蔽移动 / 开火（人机不会暂停）"
+
+[node name="ResumeButton" type="Button" parent="Panel/VBox"]
+layout_mode = 2
+text = "继续游戏（Esc）"
+
+[node name="QuitButton" type="Button" parent="Panel/VBox"]
+layout_mode = 2
+text = "退出游戏"

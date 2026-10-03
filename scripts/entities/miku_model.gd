@@ -68,6 +68,23 @@ func _apply_model_visibility() -> void:
 		(_loaded_model as Node3D).visible = not _first_person
 
 
+## 扫描 res://assets/models/<子目录>/*.glb，返回可用模型路径（Esc 菜单的角色选择、人机随机外观都用它）
+static func list_available_models() -> Array[String]:
+	var paths: Array[String] = []
+	var root := DirAccess.open("res://assets/models")
+	if root == null:
+		return paths
+	for sub in root.get_directories():
+		var dir := DirAccess.open("res://assets/models/%s" % sub)
+		if dir == null:
+			continue
+		for file in dir.get_files():
+			if file.to_lower().ends_with(".glb"):
+				paths.append("res://assets/models/%s/%s" % [sub, file])
+	paths.sort()
+	return paths
+
+
 ## 加载并替换模型（返回是否成功；文件不存在时保持占位胶囊）
 func load_model(path: String) -> bool:
 	_clear_loaded_model()

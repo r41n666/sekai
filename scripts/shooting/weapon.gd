@@ -97,6 +97,7 @@ func set_trigger_enabled(enabled: bool) -> void:
 	_trigger_enabled = enabled
 	if not enabled:
 		_trigger_held = false
+		_cancel_aim() # 释放鼠标（菜单 / 死亡界面）时自动收镜
 
 
 ## 掏出 / 收起武器（收起 = 空手：不能射击 / 开镜 / 换弹；显示与隐藏由 player.gd 控制）
@@ -105,15 +106,21 @@ func set_active(value: bool) -> void:
 	if active:
 		return
 	_trigger_held = false
-	if _aiming:
-		_aiming = false
-		aiming_changed.emit(false)
-		if _recoil:
-			_recoil.set_aiming(false)
-		if _player != null and _player.has_method("set_aiming"):
-			_player.set_aiming(false)
-		if _camera != null:
-			_camera.fov = hip_fov
+	_cancel_aim()
+
+
+## 取消开镜（收起武器 / 释放鼠标时调用）
+func _cancel_aim() -> void:
+	if not _aiming:
+		return
+	_aiming = false
+	aiming_changed.emit(false)
+	if _recoil:
+		_recoil.set_aiming(false)
+	if _player != null and _player.has_method("set_aiming"):
+		_player.set_aiming(false)
+	if _camera != null:
+		_camera.fov = hip_fov
 
 
 func _process(delta: float) -> void:
@@ -136,6 +143,10 @@ func _process(delta: float) -> void:
 
 	if not active:
 		return # 空手状态：不响应射击 / 开镜 / 换弹
+
+	if not _trigger_enabled:
+		_update_reload(delta) # 换弹计时继续走，但不响应射击 / 开镜 / 换弹（菜单 / 死亡界面打开时）
+		return
 
 	# 长按 R 3 秒：备弹补满（补给站式重置）
 	if Input.is_action_pressed("reload"):
@@ -318,7 +329,8 @@ func _deal_damage(collider) -> bool:
 	if hp_before != null and float(hp_before) <= 0.0:
 		return false # 目标已倒下（训练靶等待复活 / 玩家血量已归零）
 	var killed: bool = hp_before != null and float(hp_before) - damage <= 0.0
-	if NetworkManager.is_online and collider is Node:
+	if NetworkManager.is_online and collider is Node and not collider.is_in_group("bot"):
+		# 人机（bot 组）只在各端本地存在，伤害也只在本地结算，不走联机 RPC
 		if collider.is_in_group("friendly"):
 			# 其他玩家：只让被击中的那一端扣血（他的 HUD 与镜头震动由本端响应）
 			collider.apply_network_damage.rpc_id(

@@ -1,0 +1,65 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/bot_panel.gd" id="1_botpanel"]
+
+[node name="BotPanel" type="CanvasLayer"]
+layer = 2
+visible = false
+script = ExtResource("1_botpanel")
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -230.0
+offset_top = -190.0
+offset_right = 230.0
+offset_bottom = -40.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="VBox" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "人机管理（H）"
+horizontal_alignment = 1
+
+[node name="CountLabel" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "人机数量：0 / 8"
+horizontal_alignment = 1
+
+[node name="Buttons" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="SubButton" type="Button" parent="Panel/VBox/Buttons"]
+layout_mode = 2
+text = "－ 减少"
+
+[node name="AddButton" type="Button" parent="Panel/VBox/Buttons"]
+layout_mode = 2
+text = "＋ 增加"
+
+[node name="ClearButton" type="Button" parent="Panel/VBox"]
+layout_mode = 2
+text = "清空人机"
+
+[node name="CloseButton" type="Button" parent="Panel/VBox"]
+layout_mode = 2
+text = "关闭（H / Esc）"
+
+[node name="HintLabel" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.85, 0.95, 0.6)
+theme_override_font_sizes/font_size = 13
+text = "人机刷新在玩家周围 8~18 m；仅本端生成，联机时不同步"
+horizontal_alignment = 1

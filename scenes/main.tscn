@@ -1,8 +1,12 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Environment" path="res://assets/environments/high_quality_environment.tres" id="1_environment"]
 [ext_resource type="Script" path="res://scripts/main.gd" id="2_main"]
 [ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="4_hud"]
+[ext_resource type="Script" path="res://scripts/entities/bot_manager.gd" id="5_botmanager"]
+[ext_resource type="PackedScene" path="res://scenes/ui/game_menu.tscn" id="6_menu"]
+[ext_resource type="PackedScene" path="res://scenes/ui/bot_panel.tscn" id="7_botpanel"]
+[ext_resource type="PackedScene" path="res://scenes/ui/death_screen.tscn" id="8_death"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_water"]
 albedo_color = Color(0.07, 0.14, 0.22, 1)
@@ -59,4 +63,13 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -8)
 
 [node name="Players" type="Node3D" parent="."]
 
+[node name="Bots" type="Node3D" parent="."]
+script = ExtResource("5_botmanager")
+
 [node name="HUD" parent="." instance=ExtResource("4_hud")]
+
+[node name="GameMenu" parent="." instance=ExtResource("6_menu")]
+
+[node name="BotPanel" parent="." instance=ExtResource("7_botpanel")]
+
+[node name="DeathScreen" parent="." instance=ExtResource("8_death")]

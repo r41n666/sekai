@@ -30,9 +30,12 @@
   实现用 `set_bone_global_pose_override` + **逐级枢轴累积**（多个绝对覆写会打断父子链，必须按关节枢轴逐级叠加）；
   骨骼识别是启发式的（脚→大腿→膝→踝、手→上臂→肘沿父链定位，骨骼名乱码也能用）。
 
-## 三、待完成任务
+## 三、任务（A / B 均已完成 ✅；实现细节与验证记录见 README.md）
 
-### 任务 A：修复 `tools/pmx2glb.py`（PMX→glb 转换器，当前阻塞项）
+> 本轮已完成：**任务 A**（PMX→glb 转换器修复 + 3 个 MMD 模型接入）与 **任务 B**（Esc 菜单 / 死亡重生 / H 人机）。
+> 下面保留原始需求作为记录。
+
+### 任务 A：修复 `tools/pmx2glb.py`（已完成）
 
 **目标**：把 `assets/models/` 下两个 MMD 模型转成 glb 并加进游戏（供角色选择用）：
 - `YYB式改 小海军初音 Mku/YYB式改变miku.pmx`
@@ -66,7 +69,7 @@
 3. 解析通过后：`python tools/pmx2glb.py <pmx路径> assets/models/<英文目录名>`，产物 glb 需能被 Godot 导入、
    外观/骨骼正常（尺寸与落地交给项目侧自动适配；正面朝向约定 +Z，不对就用 `yaw_offset_deg`）。
 
-### 任务 B：菜单 / 重生 / 人机（用户明确需求）
+### 任务 B：菜单 / 重生 / 人机（已完成）
 
 1. **`Esc` 呼出菜单**：
    - 角色选择：扫描 `assets/models/*/*.glb` 生成列表，点击切换本地玩家的 `MikuModel.model_path` 并重载模型；
@@ -98,6 +101,8 @@
 
 ## 五、环境与常用操作
 
-- Godot：4.7.2（Windows 控制台版，原开发机路径 `C:\Users\13569\Desktop\Godot_v4.7.2-stable_win64_console.exe`，新机器自行替换）
+- Godot：4.7.2（Windows 控制台版，原开发机路径 `C:\Users\13569\Desktop\Godot_v4.7.2-stable_win64_console.exe`，新机器自行替换；当前机器在桌面上）
+- 本机其它工具：Blender 5.2（`D:\Program Files\Blender Foundation\Blender 5.2`，可作为 PMX 转换的备选路径）、
+  Git（`C:\Program Files\Git`）、itch（`D:\develop\itch`，后续发布用）
 - 联机自测：开两个客户端实例，一个「创建房间」，另一个用 `127.0.0.1` 加入（局域网/VPN 用内网 IP）
-- 当前仓库规模：模型 54 MB + 音乐 9 MB（已包含在仓库里）
+- 当前仓库规模：模型 54 MB + 音乐 9 MB（已包含在仓库里），另有 3 个转换好的 glb（含 Godot 抽取的贴图，约 52 MB）

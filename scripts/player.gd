@@ -67,6 +67,10 @@ const STANCE_CAMERA_Y := [1.6, 1.05, 0.35]
 const STANCE_SPEED_SCALE := [1.0, 0.5, 0.25]
 
 var health := 0.0
+## 出生点（重生用，_ready 时按生成位置记录）
+var spawn_position := Vector3.ZERO
+## 菜单 / 死亡界面打开时屏蔽移动、跳跃、开火（由界面调用 set_input_blocked）
+var input_blocked := false
 ## 联机：由主场景生成时写入的昵称（队友图标 / 击杀日志显示用）
 var player_name := ""
 var _weapons: Dictionary = {}
@@ -91,6 +95,7 @@ var _net_has_target := false
 
 func _ready() -> void:
 	health = max_health
+	spawn_position = global_position
 	# 每个玩家实例独立一份碰撞形状（蹲下 / 趴下要改高度）
 	var capsule := _collision.shape as CapsuleShape3D
 	if capsule != null:
@@ -146,6 +151,8 @@ func _setup_remote_player() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_multiplayer_authority():
 		return
+	if input_blocked:
+		return # 菜单 / 死亡界面打开时不响应操作
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if Input.is_action_pressed("free_look"):
 			# Alt 自由视角：只转镜头，不影响人物朝向与瞄准方向
@@ -174,14 +181,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	if event.is_action_pressed("ui_cancel"):
-		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-			release_mouse()
-		else:
-			capture_mouse()
-		get_viewport().set_input_as_handled()
-	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE:
-		# 释放鼠标后，点击画面即可重新锁定
+	if event is InputEventMouseButton and event.pressed and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE:
+		# 释放鼠标后，点击画面即可重新锁定（Esc 菜单的开关由 game_menu.gd 接管）
 		capture_mouse()
 
 
@@ -192,10 +193,10 @@ func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= _gravity * delta
 
-	if Input.is_action_just_pressed("jump") and is_on_floor():
+	if not input_blocked and Input.is_action_just_pressed("jump") and is_on_floor():
 		velocity.y = jump_velocity
 
-	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	var input_dir := Vector2.ZERO if input_blocked else Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var direction := _get_move_direction(input_dir)
 
 	var speed := sprint_speed if Input.is_action_pressed("sprint") else walk_speed
@@ -234,7 +235,7 @@ func _physics_process(delta: float) -> void:
 
 ## 姿态：按住 Ctrl 蹲下，Z 切换趴下（趴下时把模型放平，碰撞体用矮胶囊）
 func _update_stance(delta: float) -> void:
-	_stance = 2 if _prone else (1 if Input.is_action_pressed("crouch") else 0)
+	_stance = 2 if _prone else (1 if Input.is_action_pressed("crouch") and not input_blocked else 0)
 	var k := 1.0 - exp(-10.0 * delta)
 	var capsule := _collision.shape as CapsuleShape3D
 	if capsule != null:
@@ -339,6 +340,33 @@ func take_damage(amount: float, _source: Node = null) -> void:
 	_camera.add_trauma(clampf(amount / maxf(max_health, 1.0) * 1.6, 0.1, 0.8))
 	if health <= 0.0:
 		died.emit()
+		_enter_dead_state()
+
+
+## 阵亡：屏蔽输入并释放鼠标（死亡界面要能点「重生」按钮）
+func _enter_dead_state() -> void:
+	set_input_blocked(true)
+
+
+## 重生：回满血 + 回到出生点 + 恢复输入（由死亡界面调用）
+func respawn() -> void:
+	health = max_health
+	velocity = Vector3.ZERO
+	_prone = false
+	global_position = spawn_position
+	set_input_blocked(false)
+	capture_mouse()
+	health_changed.emit(health, max_health)
+
+
+## 菜单 / 死亡界面 / 人机面板打开时调用：屏蔽移动、跳跃与开火
+func set_input_blocked(blocked: bool) -> void:
+	input_blocked = blocked
+	if blocked:
+		release_mouse()
+	else:
+		velocity.x = 0.0
+		velocity.z = 0.0
 
 
 func heal(amount: float) -> void:
