@@ -23,9 +23,9 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -440.0
-offset_top = -270.0
+offset_top = -280.0
 offset_right = 440.0
-offset_bottom = 270.0
+offset_bottom = 280.0
 grow_horizontal = 2
 grow_vertical = 2
 
@@ -70,7 +70,7 @@ layout_mode = 2
 text = "退出游戏"
 
 [node name="RightVBox" type="VBoxContainer" parent="Panel/HBox"]
-custom_minimum_size = Vector2(420, 0)
+custom_minimum_size = Vector2(430, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
@@ -79,7 +79,7 @@ theme_override_constants/separation = 8
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.88, 0.95, 0.9)
 theme_override_font_sizes/font_size = 15
-text = "武器皮肤（先点武器，再点皮肤；下面就是 3D 检视）"
+text = "武器（点槽位 → 挑外观 / 皮肤；下面就是 3D 检视）"
 
 [node name="WeaponButtons" type="GridContainer" parent="Panel/HBox/RightVBox"]
 layout_mode = 2
@@ -88,18 +88,48 @@ theme_override_constants/h_separation = 4
 theme_override_constants/v_separation = 4
 
 [node name="Preview" type="SubViewportContainer" parent="Panel/HBox/RightVBox"]
-custom_minimum_size = Vector2(400, 250)
+custom_minimum_size = Vector2(400, 225)
 layout_mode = 2
 stretch = true
 script = ExtResource("2_preview")
 
-[node name="SkinList" type="VBoxContainer" parent="Panel/HBox/RightVBox"]
+[node name="ListsRow" type="HBoxContainer" parent="Panel/HBox/RightVBox"]
 layout_mode = 2
 size_flags_vertical = 3
+theme_override_constants/separation = 14
+
+[node name="VariantBox" type="VBoxContainer" parent="Panel/HBox/RightVBox/ListsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="VariantLabel" type="Label" parent="Panel/HBox/RightVBox/ListsRow/VariantBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.88, 0.95, 0.9)
+theme_override_font_sizes/font_size = 15
+text = "外观（模型）"
+
+[node name="VariantList" type="VBoxContainer" parent="Panel/HBox/RightVBox/ListsRow/VariantBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="SkinBox" type="VBoxContainer" parent="Panel/HBox/RightVBox/ListsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="SkinTitle" type="Label" parent="Panel/HBox/RightVBox/ListsRow/SkinBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.88, 0.95, 0.9)
+theme_override_font_sizes/font_size = 15
+text = "皮肤"
+
+[node name="SkinList" type="VBoxContainer" parent="Panel/HBox/RightVBox/ListsRow/SkinBox"]
+layout_mode = 2
 theme_override_constants/separation = 4
 
 [node name="SkinHint" type="Label" parent="Panel/HBox/RightVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.85, 0.95, 0.6)
 theme_override_font_sizes/font_size = 13
-text = "皮肤会立即套到手上的武器上（原版 = 模型自带贴图）"
+text = "外观 / 皮肤都会立即套到手上的武器上（原版皮肤 = 模型自带贴图）"

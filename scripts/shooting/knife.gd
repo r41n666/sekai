@@ -6,6 +6,8 @@ class_name Knife
 signal hit_confirmed(target_name: String, killed: bool)
 
 @export var display_name := "蝴蝶刀"
+## 武器槽（武器外观变体按槽查表）
+@export var slot := "Knife"
 @export var damage := 65.0
 @export var range_m := 2.2
 @export var swing_time := 0.22
@@ -37,11 +39,18 @@ func set_trigger_enabled(_enabled: bool) -> void:
 
 func set_active(value: bool) -> void:
 	active = value
+	if active:
+		WeaponVariant.play_intro(self, slot) # 掏出时播放翻刃动画（FPS 蝴蝶刀自带）
 
 
 ## 套用武器皮肤（Esc 菜单 / player.gd 装备时调用；空 id = 原版）
 func apply_skin(skin_id: String) -> void:
 	WeaponSkin.apply_to(self, skin_id)
+
+
+## 套用武器外观（模型变体；Esc 菜单 / player.gd 装备时调用）
+func apply_variant(variant_id: String) -> void:
+	WeaponVariant.apply_to(self, slot, variant_id)
 
 
 func _process(delta: float) -> void:

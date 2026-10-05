@@ -16,7 +16,7 @@ const WEAPON_SCENES := {
 	"Grenade": "res://scenes/weapons/grenade.tscn",
 }
 const WEAPON_NAMES := {
-	"Rifle": "M4A4 步枪", "USP": "USP 手枪", "Knife": "蝴蝶刀", "Grenade": "手雷",
+	"Rifle": "步枪", "USP": "手枪", "Knife": "刀", "Grenade": "手雷",
 }
 const TEXTURE_SIZE := 256
 

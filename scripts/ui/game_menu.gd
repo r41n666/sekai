@@ -1,10 +1,10 @@
 extends CanvasLayer
 class_name GameMenu
-## Esc 菜单（阶段 5 + 武器皮肤 / 3D 检视）
+## Esc 菜单（阶段 5 + 武器外观 / 皮肤 / 3D 检视）
 ##
 ## - Esc 开关菜单；打开时释放鼠标并屏蔽玩家输入（移动 / 跳跃 / 开火 / 开镜），关闭后重新锁定鼠标；
 ## - 左栏：角色选择（扫描 res://assets/models/*/*.glb，点击后切换本地玩家的 MikuModel 模型）；
-## - 右栏：武器皮肤（先选武器槽，再点皮肤，立即生效）+ 上面的 3D 检视（武器自转预览）；
+## - 右栏：武器槽 → 外观（模型变体，WeaponVariant）+ 皮肤（WeaponSkin）→ 上面是 3D 检视（武器自转预览）；
 ## - 退出游戏：联机时先退出房间（NetworkManager.leave_game），再退出进程；
 ## 与死亡界面 / 人机面板互斥（都在 game_ui 组，打开一个会关掉其它界面）。
 
@@ -14,11 +14,12 @@ const UI_GROUP := "game_ui"
 @onready var _resume_button: Button = $Panel/HBox/LeftVBox/ResumeButton
 @onready var _quit_button: Button = $Panel/HBox/LeftVBox/QuitButton
 @onready var _weapon_buttons: GridContainer = $Panel/HBox/RightVBox/WeaponButtons
-@onready var _skin_list: VBoxContainer = $Panel/HBox/RightVBox/SkinList
+@onready var _variant_list: VBoxContainer = $Panel/HBox/RightVBox/ListsRow/VariantBox/VariantList
+@onready var _skin_list: VBoxContainer = $Panel/HBox/RightVBox/ListsRow/SkinBox/SkinList
 @onready var _preview: WeaponPreview = $Panel/HBox/RightVBox/Preview
 
 var _model_paths: Array[String] = []
-## 3D 检视 / 皮肤当前作用的武器槽
+## 3D 检视 / 外观 / 皮肤当前作用的武器槽
 var _slot := "Rifle"
 
 
@@ -28,6 +29,7 @@ func _ready() -> void:
 	_resume_button.pressed.connect(close_ui)
 	_quit_button.pressed.connect(_on_quit_pressed)
 	_build_weapon_buttons()
+	_rebuild_variant_buttons()
 	_build_skin_list()
 	_build_model_list()
 	_refresh_highlight()
@@ -141,6 +143,19 @@ func _build_weapon_buttons() -> void:
 		_weapon_buttons.add_child(button)
 
 
+## 外观按钮（每个槽的模型清单不一样，切槽位时要重建）
+func _rebuild_variant_buttons() -> void:
+	for child in _variant_list.get_children():
+		_variant_list.remove_child(child)
+		child.queue_free()
+	for variant in WeaponVariant.variants_for(_slot):
+		var button := Button.new()
+		button.text = String(variant.get("name", variant.get("id", "?")))
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.pressed.connect(_select_variant.bind(String(variant.get("id", ""))))
+		_variant_list.add_child(button)
+
+
 ## 皮肤按钮（原版 / 伽玛多普勒 / 渐变之色 / 蓝钢）
 func _build_skin_list() -> void:
 	for skin in WeaponSkin.skins():
@@ -153,6 +168,17 @@ func _build_skin_list() -> void:
 
 func _select_slot(slot: String) -> void:
 	_slot = slot
+	_rebuild_variant_buttons()
+	_refresh_preview()
+	_refresh_highlight()
+
+
+## 换外观（模型）：记下来 + 立即套到本端武器上 + 刷新 3D 检视
+func _select_variant(variant_id: String) -> void:
+	WeaponVariant.set_selected(_slot, variant_id)
+	var player := _get_player()
+	if player != null and player.has_method("set_weapon_variant"):
+		player.set_weapon_variant(_slot, variant_id)
 	_refresh_preview()
 	_refresh_highlight()
 
@@ -185,7 +211,17 @@ func _refresh_highlight() -> void:
 		if not (button is Button):
 			continue
 		var slot: String = WeaponSkin.SLOTS[i]
-		button.text = ("▶ " if slot == _slot else "") + String(WeaponSkin.WEAPON_NAMES.get(slot, slot))
+		var slot_name := String(WeaponSkin.WEAPON_NAMES.get(slot, slot))
+		var appearance := WeaponVariant.display_name(slot)
+		button.text = ("▶ " if slot == _slot else "") + "%s·%s" % [slot_name, appearance]
+	var variants := WeaponVariant.variants_for(_slot)
+	var chosen_variant := WeaponVariant.get_selected(_slot)
+	for i in _variant_list.get_child_count():
+		var button := _variant_list.get_child(i)
+		if not (button is Button) or i >= variants.size():
+			continue
+		var variant_id := String(variants[i].get("id", ""))
+		button.text = ("▶ " if variant_id == chosen_variant else "    ") + String(variants[i].get("name", variant_id))
 	var chosen := WeaponSkin.get_selected(_slot)
 	var skins := WeaponSkin.skins()
 	for i in _skin_list.get_child_count():

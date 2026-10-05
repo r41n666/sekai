@@ -414,8 +414,10 @@ func _equip_slot(slot: String) -> void:
 	_current_slot = "" if next == null else slot
 	if next != null:
 		(next as Node3D).visible = true
+		if is_multiplayer_authority() and next.has_method("apply_variant"):
+			next.apply_variant(WeaponVariant.get_selected(slot)) # 用 Esc 菜单里选的模型外观（会重套皮肤）
 		if next.has_method("set_active"):
-			next.set_active(true)
+			next.set_active(true) # 掏出时才播「翻刃」这类开场动画，所以要放在换外观之后
 		if next.has_method("apply_skin") and is_multiplayer_authority():
 			next.apply_skin(WeaponSkin.get_selected(slot)) # 用 Esc 菜单里选的皮肤
 		if is_multiplayer_authority():
@@ -431,6 +433,14 @@ func set_weapon_skin(slot: String, skin_id: String) -> void:
 	var weapon: Node = _weapons.get(slot)
 	if weapon != null and weapon.has_method("apply_skin"):
 		weapon.apply_skin(skin_id)
+
+
+## 由 Esc 菜单调用：切换某个武器槽的模型外观并立即生效（只影响本端）
+func set_weapon_variant(slot: String, variant_id: String) -> void:
+	WeaponVariant.set_selected(slot, variant_id)
+	var weapon: Node = _weapons.get(slot)
+	if weapon != null and weapon.has_method("apply_variant"):
+		weapon.apply_variant(variant_id)
 
 
 func capture_mouse() -> void:

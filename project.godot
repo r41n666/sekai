@@ -22,6 +22,8 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+_tmp_force_import="*res://tools/_tmp_force_import.gd"
+
 MusicManager="*res://scripts/music_manager.gd"
 NetworkManager="*res://scripts/network/network_manager.gd"
 
