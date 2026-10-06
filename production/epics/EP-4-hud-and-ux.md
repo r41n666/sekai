@@ -5,6 +5,12 @@
 > **目标**：把 EP-3 的计分数据变成**玩家可见的 UI**（比分板 / 结算 / 重生倒计时），并把可访问性第二线索落到 HUD。
 > **出口判据**：结算面板显示完整比分 + 再开/回大厅；重生 3 s 自动；`AC-F1/F3/F4/F5` 的视觉回归可截图判定。
 
+> 🧹 **收尾事项已完成**：G4 期间为「`ScoreManager` 信号零消费者」而加的临时观测层
+> `scripts/debug/match_debug_probe.gd`（`MBDBG=1` 启用）**已按其立项约定整体删除**
+> ——它的删除前提正是「EP-4 HUD 落地」，而ES-4.1（比分板 ← `score_changed`）与
+> ES-4.2（结算面板 ← `match_ended`）已实现，观测职责已由 UI 接管。
+> 详见 `production/SPRINT-01.md §9` 同日记录与 `docs/architecture/control_checklist.md §4-15`。
+
 ---
 
 ## ES-4.1 · HUD 比分板 Scoreboard（常驻紧凑条）· S · ✅ 已实现

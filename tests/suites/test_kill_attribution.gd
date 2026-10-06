@@ -24,6 +24,14 @@ extends TestSuite
 ##   ① 射手端**不得**拿自己那份远端血量判生死（`killed` 对远程玩家恒假是**已知且正确**的）；
 ##   ② 受害端必须在归零时回传确认，且一个死亡周期只回传一次（否则重复计分）；
 ##   ③ 回传后仍走 A.4 原路径（房主信任模型 / 归因方向都不变）。
+##
+## 曾有的第4 条「观测层必须能看到这条链路」已随 `scripts/debug/match_debug_probe.gd`
+##   一并删除（EP-4 落地收尾）：该临时旁路的立项条件写明「EP-4 HUD 落地后须整体删除」。
+##   它的观测职责现由 HUD 承担（比分板 ← `score_changed`、结算面板 ← `match_ended`、
+##   击杀日志 / 死亡界面 ← `died`）。⚠ **不要因为「想看日志」而把它加回来**——
+##   临时 `print` 旁路会让 G4 的判据重新依赖「人肉看stdout」，而 UI 已经是更可靠的出口。
+##   ⚠ 若将来给 `remote_kill_confirmed` 补消费者，优先补**玩家可见的击杀日志**（UI 侧），
+##   而非新的调试 print。
 
 const WEAPON_SRC := "res://scripts/shooting/weapon.gd"
 const KNIFE_SRC := "res://scripts/shooting/knife.gd"
@@ -146,20 +154,3 @@ func test_net_confirm_kill_is_an_rpc() -> void:
 		"net_confirm_kill 必须是 @rpc 方法（受害端 → 射手端的跨端确认）")
 	check_true(head.find("\"authority\"") >= 0 or head.find("call_remote") >= 0,
 		"net_confirm_kill 应为 call_remote（受害端本地不重复执行计分）")
-
-
-# ---------------------------------------------------------------------------
-# ③ 观测层必须能看到这条链路（否则同一个缺陷还会再隐身一次）
-# ---------------------------------------------------------------------------
-
-## 观测层要打印 `kill_confirmed`，否则「扣血正常但比分恒 0」在日志里完全不可见。
-func test_probe_observes_kill_confirmation() -> void:
-	var f: FileAccess = FileAccess.open("res://scripts/debug/match_debug_probe.gd", FileAccess.READ)
-	if f == null:
-		pending("观测层文件不存在（EP-4 落地后已按设计删除）")
-		return
-	var src := f.get_as_text()
-	check_true(src.find("remote_kill_confirmed") >= 0,
-		"观测层应监听 remote_kill_confirmed（G4 判定「击杀是否被计分」的唯一出口）")
-	check_true(src.find("kill_confirmed") >= 0,
-		"观测层应打印 kill_confirmed 事件，供双端日志对照")
