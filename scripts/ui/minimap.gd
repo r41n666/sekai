@@ -10,7 +10,9 @@ class_name Minimap
 ## TODO(阶段2+)：地形贴图（TextureRect / SubViewport）、缩放档位、敌人只在小地图显示已暴露目标。
 
 ## 显示范围半径（米）
-@export var world_radius := 45.0
+## 80×80 竞技场（design/gdd/03_map_encounter.md）的对角半长 = √(40²+40²) ≈ 56.6 m，
+## 取 60 完整覆盖整图并留 3.4 m 余量（对齐 03_map §6 AC-2 / ⚑M-5 的目标值 ≥60）。
+@export var world_radius := 60.0
 ## 是否随视角旋转
 @export var rotate_with_player := true
 @export var obstacle_group := "minimap_obstacle"
