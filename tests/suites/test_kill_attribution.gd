@@ -25,6 +25,13 @@ extends TestSuite
 ##   ② 受害端必须在归零时回传确认，且一个死亡周期只回传一次（否则重复计分）；
 ##   ③ 回传后仍走 A.4 原路径（房主信任模型 / 归因方向都不变）。
 ##
+## 断言口径（ES-4 收尾时按变异测试结果加固，见下）：
+##   ②③ 两条不变量**必须锁到「表达式 / 守卫语义」一级**，不能只锁「token 存在」或「求值顺序」——
+##   顺序正确的 `var was_alive := false`、以及被摘掉的 `if victim_id < 0:` 都曾让本 suite 全绿，
+##   而两者都会让 C-18 原缺陷复发。`_line_with` / `_has_cmp_zero` / `_strip_comment` 是为此加的
+##   语义级工具（§4-13：先剥注释、按语义锁，而不是搜单条字面量）。
+##   长期回归：`tools/mutation_c18_probe.py`（15 变异体：13 杀伤 + 2 守恒对照 / 0 存活0 误杀）。
+##
 ## 曾有的第4 条「观测层必须能看到这条链路」已随 `scripts/debug/match_debug_probe.gd`
 ##   一并删除（EP-4 落地收尾）：该临时旁路的立项条件写明「EP-4 HUD 落地后须整体删除」。
 ##   它的观测职责现由 HUD 承担（比分板 ← `score_changed`、结算面板 ← `match_ended`、
@@ -54,6 +61,51 @@ func _func_body(src: String, header: String) -> String:
 	if j < 0:
 		return src.substr(i)
 	return src.substr(i, j - i)
+
+
+## 剥掉**行尾注释**，只保留 `#` 之前的代码部分（§4-13(a)）。
+## ⚠ 不能「有 `#` 就整行丢」——那会把 `xxx(true) # 注释` 的代码也丢掉，
+##   导致代码明明在、纪律锁却报「没调用」（ES-4.2 实测）。
+##已知局限：字符串字面量里的 `#` 会被误当注释起点（本suite 断言的两个函数体内无此写法）。
+func _strip_comment(line: String) -> String:
+	var i := line.find("#")
+	if i < 0:
+		return line
+	return line.substr(0, i)
+
+
+## 返回**第一条**（已剥注释的）含 `token` 的单行代码；找不到返回 ""。
+func _line_with(src: String, token: String) -> String:
+	for raw in src.split("\n"):
+		var code := _strip_comment(raw)
+		if code.find(token) >= 0:
+			return code
+	return ""
+
+
+## 该行是否是「`health` 与 `0` 的比较」（**两侧顺序无关**）。
+## ⚠ **不能只搜字面量 `> 0`**：那会把等价改写 `0.0 < health` 误杀（守恒对照实测）。
+##   口径：正反两个方向都认`health <op> 0` 与 `0 <op> health`（`<op>` ∈ 6 种比较符）。
+##   → `health > 0.0` / `0.0 < health` / `health >= 0` 全部通过；
+##     而 `false` / `true`（无 health）/ `health > 100.0`（右侧不是 0）仍转红。
+## 该行是否是「`var_name` 与 `0` 的比较」（**两侧顺序无关**）。
+## ⚠ 三个正则陷阱（均由单元测试/守恒对照实测捕获，改动前务必保留这些约束）：
+##   ① 写成 `0` 会匹配 `0.5` 的前缀 → 「阈值改成 0.5」的变异会逃过；
+##      故用 `0(?:\.0+)?(?![\d.])` 断尾。
+##   ② 只搜 `> 0` 单一字面量会误杀等价改写 `0.0 < health`（守恒对照实测）。
+##   ③ **被比较的变量名必须参数化**：早期版本把 `health` 写死在函数里，
+##      又拿它去校验 `victim_id < 0` 守卫 → 该断言恒假、verify 直接转红。
+##      故此处按「字段 × 运算符 × 方向」枚举，而非针对某个变量硬编码。
+func _has_cmp_zero(code: String, var_name: String = "health") -> bool:
+	var zero := "0(?:\\.0+)?(?![\\d.])"
+	var ops := "(?:>=|<=|==|!=|>|<)"
+	var re := RegEx.new()
+	# 方向一：变量在左；方向二：0 在左（两侧顺序无关）
+	re.compile(var_name + "\\s*" + ops + "\\s*" + zero)
+	if re.search(code) != null:
+		return true
+	re.compile(zero + "\\s*" + ops + "\\s*" + var_name)
+	return re.search(code) != null
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +174,17 @@ func test_victim_confirms_kill_once_on_death() -> void:
 	if i_snapshot >= 0 and i_damage >= 0:
 		check_true(i_snapshot < i_damage,
 			"var was_alive 必须在 take_damage 之前求值（取挨枪前的血量），否则确认永不回传")
+	# ── 表达式本身（不止顺序）：`var was_alive` 的**右边**必须真的是「本轮是否还活着」──
+	# ⚠ 上一条顺序断言单独用时**不足**：`var was_alive := false`（顺序完全正确）曾让本用例全绿，
+	#   因为顺序断言与「token 存在」都只认`var was_alive` 这个词，不看它被赋成什么。
+	#   而恒false 会让守卫 `was_alive and health <= 0.0` 恒假 → 确认永不回传 → 比分恒 0（= C-18 复发）。
+	# 口径：按语义锁「health 与 0 的比较」，而非字面量 `health > 0.0`，
+	#   这样 `0.0 < health` 等价改写仍通过、但 `false` / `true` / 改阈值（`> 100.0`）都会转红。
+	var decl := _line_with(body, "var was_alive")
+	check_true(decl.find("health") >= 0,
+		"was_alive 必须由 health 求值（`var was_alive := false` 会让死亡瞬间守卫恒假、确认永不回传）")
+	check_true(_has_cmp_zero(decl),
+		"was_alive 的求值必须是「health 与 0 的比较」（如 `health > 0.0`），不能是常量或改过的阈值")
 	# 回传条件必须真的依赖 was_alive（而不是恒假 / 恒真的死表达式）
 	var cond := ""
 	var i_cond := body.find("if was_alive")
@@ -139,6 +202,39 @@ func test_confirm_routes_through_score_manager_report() -> void:
 		"net_confirm_kill 必须转调 ScoreManager._report_local_kill（复用 A.4 权威端直调 / 客户端 rpc_id(1,…) 两条既有路径）")
 	check_true(body.find("resolve_victim_id") >= 0,
 		"net_confirm_kill 必须用 ScoreManager.resolve_victim_id 解析被击倒者（节点名 = peer id）")
+
+
+## ⚠ 上一条只锁「用到了 resolve_victim_id」，**没锁它的失败分支**——
+##   把 `if victim_id < 0:` 改成 `if false:` 曾让本用例全绿（ES-4收尾变异测试实测）。
+##   后果不是「少上报」而是**上报错人**：`resolve_victim_id` 对非玩家节点返回 `-1`，
+##   守卫一旦失效，`_report_local_kill(-1)` 会把这次击杀算到房主id=-1 的假账上，
+##   而 A.4 的信任模型（`get_remote_sender_id()` 反查击杀者）**不会**拦下它。
+##   → 因此这里必须按语义锁「`victim_id` 与负数比较 + 守卫成立时 return」。
+func test_net_confirm_kill_guards_invalid_victim_id() -> void:
+	var src := _read_source(PLAYER_SRC)
+	var body := _func_body(src, "func net_confirm_kill")
+	check_true(body.find("resolve_victim_id") >= 0,
+		"net_confirm_kill 应先解析 victim_id（否则本用例的守卫无从谈起）")
+	# 守卫条件行：含 `victim_id` 且与 0 比较（允许 `< 0` / `<= 0`）。
+	# ⚠ 不能只 `find("victim_id < 0")`：那是字面量锁，`victim_id <= 0` 这类等价写法会被误杀。
+	var guard := _line_with(body, "if victim_id")
+	check_true(guard.find("victim_id") >= 0 and _has_cmp_zero(guard, "victim_id"),
+		"net_confirm_kill 必须校验 `victim_id < 0`（非玩家节点 resolve 出 -1，不校验会把击杀算到假账上）")
+	# 守卫成立必须 `return` 早退，不能继续往下调 _report_local_kill。
+	# 取守卫行之后的一小段（到下一个 func / 段末），要求其首个非空行是 return。
+	var after := ""
+	var gi := body.find("if victim_id")
+	if gi >= 0:
+		after = body.substr(gi, 160)
+	var first_stmt := ""
+	for raw in after.split("\n"):
+		var code := _strip_comment(raw).strip_edges()
+		if code == "" or code.begins_with("if victim_id"):
+			continue
+		first_stmt = code
+		break
+	check_true(first_stmt.begins_with("return"),
+		"victim_id 非法时应`return` 早退（否则 _report_local_kill(-1) 会把击杀记到假账上）")
 
 
 ## net_confirm_kill 必须是 RPC（否则跨端收不到），且带 authority 语义。

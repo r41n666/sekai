@@ -13,20 +13,30 @@ mutation_c18_probe.py —— 变异测试：证明 C-18「联机击杀归因」�
   · 还原后逐字节比对，确保不留变异残留
   本项目已因「锚点不匹配 → 什么都没注入 → 误判存活」栽过两次。
 
-实测结论（2026-10-06，删除观测层后）：7/7 全杀 —— 删观测层没有削弱 C-18 防线。
+实测结论（2026-10-06，删除观测层后）：
+  杀伤组 7/7 全杀—— 删观测层没有削弱 C-18 防线。
+  同日加固弱断言后：**杀伤组 13/13 全杀 + 守恒对照组 2/2 仍全绿**（共 15 变异体）。
 
-⚠ 两条**已知的覆盖缺口**（变异体存活，均为 suite 既有覆盖边界，与本轮删除无关，
-   记录在此以免后人误以为是新回归；补覆盖请先确认不会与他人在制品冲突）：
-  ① `var was_alive := health > 0.0` 改成 `:= false` → **存活**。
-     suite 断言的是「`var was_alive` 出现在 `take_damage(amount)` 之前」这个**顺序**，
-     以及守卫串里含 `health <= 0.0`，**不检查 was_alive 的求值表达式**。
-     （该顺序断言是 ES-4.2 变异测试的产物：更早的「token 存在」版本被证伪。）
-  ② `net_confirm_kill` 里 `if victim_id < 0:` 改成 `if false:` → **存活**。
-     suite 只断言用到 `resolve_victim_id`，未断言该守卫本身。
-  ③ `load_steps` 写错（如 12 → 99）→ **存活**：Godot 不对 load_steps 做强校验，
-     实测 6 轮（3 变异 / 3 基线）ERROR 数恒为 1，且该 ERROR 是 `--quit-after`
-     提前退出的既有噪声，与 load_steps 无关。故 load_steps 正确性靠 §4-11 的diff 纪律
-     与人工核算保证，无自动化守护。
+⚠ 历史记录（ES-4 收尾时一度存在的两条弱断言，**已修**）：
+  ① `var was_alive := health > 0.0` 改成 `:= false` → 曾**存活**。
+     原因：当时只断言「`var was_alive` 出现在 `take_damage(amount)` 之前」这个**顺序**，
+     不看它被赋成什么。修复：新增 `_line_with` / `_has_cmp_zero` 语义级断言，
+     要求 `was_alive` 由 `health` 与 0 比较求值。
+  ② `net_confirm_kill` 里 `if victim_id < 0:` 改成 `if false:` → 曾**存活**。
+     原因：只断言用到了 `resolve_victim_id`，没锁失败分支。
+     修复：新增 `test_net_confirm_kill_guards_invalid_victim_id`。
+
+⚠ **弱断言有两个方向，只测一个方向仍不够**（§4-13 的延伸）：
+  · 漏杀：真缺陷改了却全绿 → 上面的 ①②。
+  · 误杀：语义等价的改写被挡下 → 说明断言退化成了字面量锁，同样是坏断言。
+  故本脚本设`EXPECT_GREEN` 守恒对照组：`0.0 < health`（等价比较）、
+  `victim_id <= 0`（等价守卫）必须**仍然全绿**。
+  对照组若转红，脚本判为「误杀」并以非零退出。
+
+⚠ `load_steps` **故意不加锁**：Godot 不对它做强校验（实测 6 轮：3 变异 / 3 基线，
+  ERROR 数恒为 1，且该 ERROR 是 `--quit-after` 提前退出的既有噪声）。
+  锁它拦不住真正的加载失败、只给虚假安全感。`load_steps` 正确性
+  靠 `ext + sub + 1` 人工核算 + `control_checklist §4-11` 的 diff 纪律保证。
 """
 import io
 import os
@@ -42,6 +52,62 @@ KNIFE = os.path.join("scripts", "shooting", "knife.gd")
 
 # ── 变异体：每个都针对 test_kill_attribution.gd 里真实存在的断言 ──────────
 MUTANTS = [
+    (
+        "C2_was_alive_constant_false",
+        PLAYER,
+        "\tvar was_alive := health > 0.0\n\ttake_damage(amount)\n",
+        "\tvar was_alive := false\n\ttake_damage(amount)\n",
+        "was_alive 赋恒 false（**顺序仍正确**）→ 断言「必须由 health 求值」",
+    ),
+    (
+        "C3_was_alive_constant_true",
+        PLAYER,
+        "\tvar was_alive := health > 0.0\n\ttake_damage(amount)\n",
+        "\tvar was_alive := true\n\ttake_damage(amount)\n",
+        "was_alive 赋恒 true → 防止只挡 false 方向的半边断言",
+    ),
+    (
+        "C4_was_alive_threshold_changed",
+        PLAYER,
+        "\tvar was_alive := health > 0.0\n\ttake_damage(amount)\n",
+        "\tvar was_alive := health > 100.0\n\ttake_damage(amount)\n",
+        "was_alive 阈值被改成 100（仍含 health 与 >）→ 断言「与 0 比较」",
+    ),
+    (
+        "C4b_was_alive_threshold_fractional",
+        PLAYER,
+        "\tvar was_alive := health > 0.0\n\ttake_damage(amount)\n",
+        "\tvar was_alive := health > 0.5\n\ttake_damage(amount)\n",
+        "was_alive 阈值被改成 0.5 → 防「`0` 匹配 `0.5` 前缀」的正则陷阱（单元测试实测）",
+    ),
+    (
+        "C5_was_alive_snapped_back_to_comparison",
+        PLAYER,
+        "\tvar was_alive := health > 0.0\n\ttake_damage(amount)\n",
+        "\tvar was_alive := 0.0 < health\n\ttake_damage(amount)\n",
+        "was_alive 改成等价写法 `0.0 < health` → **必须仍然全绿**（守恒性对照）",
+    ),
+    (
+        "H_victim_guard_disabled",
+        PLAYER,
+        "\tif victim_id < 0:\n\t\treturn # 双保险：节点名不是 peer id（非玩家节点）→ 不上报\n",
+        "\tif false:\n\t\treturn # 双保险：节点名不是 peer id（非玩家节点）→ 不上报\n",
+        "摘掉 victim_id < 0 守卫 → 断言「必须校验 victim_id」",
+    ),
+    (
+        "H2_victim_guard_no_return",
+        PLAYER,
+        "\tif victim_id < 0:\n\t\treturn # 双保险：节点名不是 peer id（非玩家节点）→ 不上报\n",
+        "\tif victim_id < 0:\n\t\tpass # 双保险：节点名不是 peer id（非玩家节点）→ 不上报\n",
+        "守卫条件在但不 return → 断言「守卫成立必须早退」",
+    ),
+    (
+        "H3_victim_guard_leq_variant",
+        PLAYER,
+        "\tif victim_id < 0:\n\t\treturn # 双保险：节点名不是 peer id（非玩家节点）→ 不上报\n",
+        "\tif victim_id <= 0:\n\t\treturn # 双保险：节点名不是 peer id（非玩家节点）→ 不上报\n",
+        "守卫改成等价的 `<= 0` → **必须仍然全绿**（证明不是字面量锁）",
+    ),
     (
         "A_kill_confirm_call_removed",
         PLAYER,
@@ -106,6 +172,14 @@ def _write(p, t):
         f.write(t)
 
 
+# ── 守恒性对照变异体：语义**等价**，期望测试仍然全绿 ────────────────────
+# 这些不是「杀不杀」的问题，而是「会不会误杀」的问题。
+# 一个只会搜字面量的弱断言，既可能挡不住真缺陷（漏杀），
+# 也可能挡住等价改写（误杀）。两者都是坏断言，故两类都要测。
+EXPECT_GREEN = {"C5_was_alive_snapped_back_to_comparison",
+                "H3_victim_guard_leq_variant"}
+
+
 def run_tests(root, timeout=300):
     cmd = [GODOT, "--headless", "--path", root, "res://tests/test_runner.tscn"]
     try:
@@ -122,10 +196,12 @@ def main():
     if not os.path.isfile(GODOT):
         print("FAIL 找不到 Godot: %s" % GODOT)
         return 2
-    survivors, tool_errors = [], []
+    survivors, tool_errors, false_kills = [], [], []
     for mid, rel, anchor, repl, desc in MUTANTS:
+        expect_green = mid in EXPECT_GREEN
+        tag = "守恒对照" if expect_green else "杀伤"
         print("=" * 74)
-        print("[%s] %s" % (mid, desc))
+        print("[%s][%s] %s" % (mid, tag, desc))
         full = os.path.join(ROOT, rel)
         if not os.path.isfile(full):
             print("  ✗ 工具缺陷：文件不存在 %s" % rel)
@@ -156,20 +232,31 @@ def main():
                if "test_kill_attribution" in ln]
         for h in hit[:3]:
             print("│%s" % h)
-        if red:
-            print("  → 变异体被杀 ✓")
+        if expect_green:
+            if red:
+                print("  →✗ 误杀！等价改写被断言挡下 → 断言是字面量锁（弱）")
+                false_kills.append(mid)
+            else:
+                print("  → 等价改写仍全绿 ✓（断言按语义锁，未误杀）")
         else:
-            print("  → ⚠ 存活（exit %s）" % rc)
-            survivors.append(mid)
+            if red:
+                print("  → 变异体被杀 ✓")
+            else:
+                print("  → ⚠ 存活（exit %s）" % rc)
+                survivors.append(mid)
     print("=" * 74)
     if tool_errors:
         print("工具缺陷：%s" % ", ".join(tool_errors))
         return 2
-    if survivors:
-        print("存活 %d/%d：%s" % (len(survivors), len(MUTANTS),
-                                   ", ".join(survivors)))
+    if survivors or false_kills:
+        if survivors:
+            print("存活（漏杀）%d：%s" % (len(survivors), ", ".join(survivors)))
+        if false_kills:
+            print("误杀 %d：%s" % (len(false_kills), ", ".join(false_kills)))
         return 1
-    print("全部 %d 个变异体被杀 ✓ —— C-18 守门能力完好" % len(MUTANTS))
+    n_kill = len(MUTANTS) - len(EXPECT_GREEN)
+    print("杀伤组 %d/%d 全杀 ✓；守恒对照组 %d/%d 仍全绿 ✓ —— C-18 守门能力完好"
+          % (n_kill, n_kill, len(EXPECT_GREEN), len(EXPECT_GREEN)))
     return 0
 
 
