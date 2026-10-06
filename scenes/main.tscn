@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Environment" path="res://assets/environments/high_quality_environment.tres" id="1_environment"]
 [ext_resource type="Script" path="res://scripts/main.gd" id="2_main"]
@@ -8,6 +8,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/bot_panel.tscn" id="7_botpanel"]
 [ext_resource type="PackedScene" path="res://scenes/ui/death_screen.tscn" id="8_death"]
 [ext_resource type="Script" path="res://scripts/game/score_manager.gd" id="9_scoremanager"]
+[ext_resource type="Script" path="res://scripts/debug/match_debug_probe.gd" id="10_mbdbg"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_water"]
 albedo_color = Color(0.07, 0.14, 0.22, 1)
@@ -66,6 +67,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -32, 0.5, 32)
 
 [node name="ScoreManager" type="Node" parent="."]
 script = ExtResource("9_scoremanager")
+
+[node name="MatchDebugProbe" type="Node" parent="."]
+script = ExtResource("10_mbdbg")
 
 [node name="Bots" type="Node3D" parent="."]
 script = ExtResource("5_botmanager")
