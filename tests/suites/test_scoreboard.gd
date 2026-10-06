@@ -116,11 +116,41 @@ func test_kd_text_zero_deaths_uses_kills() -> void:
 # ③ 倒计时格式与临界提示
 # ---------------------------------------------------------------------------
 
-func test_format_clock() -> void:
+## 整数锚点（保留：锁住 §3.1 文档示例与整分/负数两个边界）。
+func test_format_clock_integer_anchors() -> void:
 	check_eq(_sb.format_clock(204.0), "03:24", "204 秒应格式化为 03:24（§3.1 示例）")
 	check_eq(_sb.format_clock(300.0), "05:00", "300 秒应为 05:00")
 	check_eq(_sb.format_clock(59.0), "00:59", "不足 1 分钟应只显示秒")
 	check_eq(_sb.format_clock(-5.0), "00:00", "负数应夹到 00:00，不得显示负分")
+
+
+##⚠ 防「ceil→floor」变异（QA B1 缺口，本轮补上）。
+##
+## 之前本用例四个输入**全是整数**，而 `format_clock` 的实现是
+##   `maxi(int(ceil(maxf(seconds, 0.0))), 0)`
+## —— 对整数而言 `ceil(x) == floor(x)`。于是把 `ceil` 换成 `floor` 后，
+## 期望值一个都不变、435 条断言**一条不红**，但运行时倒计时末秒会反复
+## 跳变（59.5s 显示「00:59」下一秒变「01:00」再退回，秒数抽搐）。
+## 这类「只在非整数上才显形」的缺陷，用整数输入**在原理上就测不出来**。
+## 故本用例专门喂非整数：每个期望值都与 `floor` 的结果**逐条不同**，
+## 保证 `ceil` 被换成 `floor` 时必定转红。
+func test_format_clock_rounds_up_on_fractional_input() -> void:
+	# 期望值按 ceil 语义推算：0.2→1、59.5→60、60.9→61、204.4→205（秒）
+	check_eq(_sb.format_clock(0.2), "00:01",
+		"0.2 秒应**向上进位**到 00:01（floor 会给00:00 —— 防末秒显示 0）")
+	check_eq(_sb.format_clock(59.5), "01:00",
+		"59.5 秒应进位到 01:00，不得停在 00:59（floor 会给 00:59）")
+	check_eq(_sb.format_clock(60.9), "01:01",
+		"60.9 秒应进位到 01:01（floor 会给 01:00）")
+	check_eq(_sb.format_clock(204.4), "03:25",
+		"204.4 秒应进位到 03:25（floor 会给 03:24）")
+
+
+## 同一条`ceil` 契约的负向侧：负小数也必须先被 `maxf(·, 0.0)` 夹到 0
+## 再进位，不能因为ceil/floor 的先后顺序差异冒出 "-1" 或负分位。
+func test_format_clock_fractional_negative_is_clamped() -> void:
+	check_eq(_sb.format_clock(-0.5), "00:00", "负小数应夹到 00:00")
+	check_eq(_sb.format_clock(-0.0001), "00:00", "极小负数应夹到 00:00")
 
 
 ## 14 杀 → 临界闪烁；15 杀 → 已达成，**不再**闪。

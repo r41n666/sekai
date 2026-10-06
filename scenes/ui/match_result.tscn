@@ -1,0 +1,94 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/match_result.gd" id="1_match_result"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_result_bg"]
+bg_color = Color(0.02, 0.06, 0.1, 0.45)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.55, 0.8, 1, 0.28)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[node name="MatchResult" type="CanvasLayer"]
+layer = 4
+visible = false
+script = ExtResource("1_match_result")
+
+[node name="Dim" type="ColorRect" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.04, 0.08, 0.72)
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -260.0
+offset_top = -180.0
+offset_right = 260.0
+offset_bottom = 180.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_result_bg")
+
+[node name="VBox" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.86, 0.45, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 34
+text = "对局结束"
+horizontal_alignment = 1
+
+[node name="Winner" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 24
+text = "🏆 你 获胜"
+horizontal_alignment = 1
+
+[node name="Table" type="VBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="Duration" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.82, 0.9, 0.96, 0.92)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 18
+text = "本局时长 05:00"
+horizontal_alignment = 1
+
+[node name="Buttons" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="AgainButton" type="Button" parent="Panel/VBox/Buttons"]
+custom_minimum_size = Vector2(160, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "再来一局"
+
+[node name="LobbyButton" type="Button" parent="Panel/VBox/Buttons"]
+custom_minimum_size = Vector2(160, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "返回大厅"

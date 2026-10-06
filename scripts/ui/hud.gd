@@ -10,6 +10,8 @@ class_name GameHUD
 ##   HealthRoot     生命值
 ##   AmmoPanel      弹药 / 装备
 ##   KillFeed       击杀日志
+##   Scoreboard     常驻比分条 + Tab 完整榜（EP-4 ES-4.1）
+##   MatchResult    结算面板（EP-4 ES-4.2，只绑 match_ended 信号；**不暂停**游戏）
 ##
 ## 数据来源（通过场景组解耦查找）：player / weapon / recoil / camera
 ##   —— EP-4 起新增一条：**ScoreManager**（比分板 / 结算面板的唯一数据源，附录 A.5）
@@ -33,6 +35,7 @@ class_name GameHUD
 @onready var _kill_feed: VBoxContainer = $KillFeed
 @onready var _leave_button: Button = $LeaveButton
 @onready var _scoreboard: Scoreboard = $Scoreboard
+@onready var _match_result: MatchResult = $MatchResult
 
 var _player: Node
 var _weapon: Node
@@ -40,6 +43,8 @@ var _recoil: Node
 var _bound := false
 ## ScoreManager 是否已接上比分板（_ready 时序不确定，取不到就每帧重试）
 var _scoreboard_bound := false
+## ScoreManager 是否已接上结算面板（同上，独立标志位）
+var _match_result_bound := false
 
 
 func _ready() -> void:
@@ -52,19 +57,38 @@ func _ready() -> void:
 	#   UI 只绑信号、不碰 RPC / 不自行判定胜负（胜负口径唯一归 ScoreManager._evaluate_winner）。
 	#   ⚠ 时序：HUD 的 _ready 可能早于/晚于 ScoreManager，故用节点名兜底取一次并允许延迟重试。
 	_bind_scoreboard()
+	# EP-4 ES-4.2：结算面板同样只绑 `match_ended` 信号（附录 A.5）——
+	#   UI 不碰 RPC、不自行判定胜负（胜负口径唯一归 ScoreManager._evaluate_winner）。
+	#   ⚠ 结算面板是**不暂停**的覆盖层（§3.2），故这里不做任何 get_tree().paused 操作。
+	_bind_match_result()
 
 
 ## EP-4 ES-4.1：把 ScoreManager 接到比分板（取不到时下一帧再试，避免 _ready 顺序问题）。
 func _bind_scoreboard() -> void:
-	var scene := get_tree().current_scene
-	if scene == null:
-		return
-	var score := scene.get_node_or_null("ScoreManager")
+	var score := _find_score_manager()
 	if score == null:
 		return
 	_scoreboard.set_local_peer_id(score.local_peer_id())
 	_scoreboard.bind(score)
 	_scoreboard_bound = true
+
+
+## EP-4 ES-4.2：把 ScoreManager 接到结算面板（与 _bind_scoreboard 同构的兜底重试）。
+func _bind_match_result() -> void:
+	var score := _find_score_manager()
+	if score == null:
+		return
+	_match_result.bind(score)
+	_match_result_bound = true
+
+
+## ScoreManager 在 `main.tscn` 下与 HUD 平级，按节点名取（不用组查找：
+## ScoreManager 不该被别的东西按「组」语义误用）。
+func _find_score_manager() -> Node:
+	var scene := get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("ScoreManager")
 
 
 ## 按住 Tab 显示完整榜、松开隐藏（§3.1.1 · 非模态，可边看边打）。
@@ -90,6 +114,10 @@ func _process(_delta: float) -> void:
 		_bind_scoreboard() # 延迟兜底：ScoreManager 可能晚于 HUD 就绪
 	elif _scoreboard != null:
 		_scoreboard.refresh_names()
+	if not _match_result_bound:
+		_bind_match_result() # 同上：结算面板独立标志位
+	elif _match_result != null:
+		_match_result.refresh_names()
 	if _weapon == null or _recoil == null:
 		return
 

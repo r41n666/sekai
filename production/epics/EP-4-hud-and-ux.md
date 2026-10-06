@@ -35,7 +35,7 @@
   接线契约锁 / 输入动作注册 / 场景节点路径 / 字号下限 / 禁止自行判定胜负。
   窗口实测（Vulkan，300 帧）确认：`▶ 玩家1  0`、`1　玩家1　0　0　—`、Tab 切换正常、0 脚本错误。
 
-## ES-4.2 · 结算面板 `match_result`（终态）· M · ⏳ 待实施
+## ES-4.2 · 结算面板 `match_result`（终态）· M · ✅ 已实现
 
 - **目标**：新增全屏结算面板：标题「对局结束」→ 胜者行 → 完整比分表（排名/名字/击杀/死亡/KD）→ 本局时长 → `[再来一局]`（仅房主）｜`[返回大厅]`。
 - **验收标准**（`04_ux §3.2`）：
@@ -44,6 +44,61 @@
 - **依赖**：EP-3 ES-3.4。
 - **涉及文件**：**新增** `scripts/ui/match_result.gd` + `scenes/ui/match_result.tscn`；参照 `scenes/ui/death_screen.tscn`；`scripts/ui/game_menu.gd`（`game_ui` 组互斥）。
 - **测试证据**：契约锁——断言新面板 `add_to_group(UI_GROUP)` 且实现 `open_ui/close_ui`。
+
+### 实现要点（工程侧补记）
+
+- **纯逻辑 / 渲染分离**（沿用 ES-4.1 取舍）：「数据 → 显示什么」的推导全部抽成**静态纯函数**
+  ——`title_for` / `winner_text` / `format_duration` / `elapsed_seconds` / `build_standings` /
+  `row_text` / `button_caption` / `can_request_reset`，headless 可直接断言、零副作用；
+  节点树只负责把输出贴到 Label。
+- **排序与文案口径一律复用 `Scoreboard`，不另写一套**：`build_standings` → `Scoreboard.build_rows`、
+  `row_text` → `Scoreboard.full_row_text`、`winner_text` → `Scoreboard.display_name_for`、
+  `format_duration` → `Scoreboard.format_clock`。理由：结算面板与比分板若各排一次，
+  会出现「比分板显示 A 第一、结算面板显示 B 第一」的自相矛盾（本项目已登记过的风险）。
+- **时长**：`elapsed_seconds = match_duration - time_remaining`（**不是**直接用上限——
+  赢在 15 杀时提前结束，直接显示上限会谎报时长）；格式**不显示小时**：
+  §3.2 只写「本局时长」未要求 `HH:MM:SS`，而单局上限 300 s→ 小时位永不可达（死代码），
+  且与 ES-4.1 剩余计时同为 `MM:SS` 可免掉同屏两套单位。边界 `3600s → "60:00"` 已钉进测试。
+- **⚠ 「不暂停」≠「不屏蔽输入」（两者独立，已分别加锁）**：
+  - **不暂停**：`get_tree().paused` 全程不动。理由：面板是覆盖层（§1 现状约束），
+    且 `ScoreManager` 靠 `_process` 驱动倒计时/计时，暂停树会让它停摆。
+  - **要屏蔽输入**：面板属于「打开即屏蔽输入」类别 —— ① 鼠标必须**可见**才能点按钮，
+    而释放鼠标的唯一入口就是 `player.set_input_blocked(true)`；② 对局已 ENDED、
+    武器触发器应随之关闭（§4-1「双闸门」，不要只调 `release_mouse` 一半）。
+    `close_ui()` 对称恢复 `set_input_blocked(false)` + `capture_mouse()`，与 `game_menu` 同口径。
+- **客户端按钮**：`button_caption(false) == "等待房主…"` 且 `disabled = true`。
+  文案与可点性由 `can_request_reset()` **同源**派生，避免「写着等待房主却能点」的矛盾态
+  （客户端点了也什么都不会发生 —— `request_reset()` 开头就是 `if not is_authority(): return`）。
+- **不碰 RPC**（架构铁律）：只连`ScoreManager.match_ended` 本地信号；
+  复位只调既有 `ScoreManager.request_reset()`，不自造 `net_match_reset`。
+- **胜负不由 UI 判定**：本面板只**消费** `match_ended` 传来的 `winner_id`，
+  代码中不存在任何`kills`/`deaths` 的比较运算（语义级纪律锁，见下）。
+
+### 测试证据
+
+- `tests/suites/test_match_result.gd` **36 用例 / 148 断言**（已登记进 `test_runner.gd::SUITE_SCRIPTS`，§4-9）——
+  胜者行四态（本人 / 他人 / 平局 / 未定，且平局**不得**出现玩家名）/ 时长边界 0·59·60·3599·3600 /
+  时长格式与比分板一致 / **排序逐行序列与 `Scoreboard.build_rows` 完全相等（QA AC-A4，
+  5 组数据 × 2 视角，含并列/同分/0:0/单人）** / KD 零分母 / **面板打开时 `paused` 仍为 false** /
+  `game_ui` 组与`open_ui·close_ui·is_open` 契约 / **互斥实测**（打开时关闭同组其它界面）/
+  **Tab 完整榜在结算面板打开时不响应（QA B2/AC-B7 阻塞项，用真实 `scoreboard.tscn` 端到端实测）** /
+  客户端文案与 `disabled` / 纪律锁（不得重算胜负、不得发 RPC、复位只走 `request_reset`）/
+  接线契约锁 / 字号下限 / 领先者加粗双通道。
+- **与 QA 审计对齐**（`production/qa/ES-4.1-audit-and-ES-4.2-acceptance.md`）：
+  Q1「`paused` 恒 false + `set_input_blocked(true)`」与 Q2「复用 `ScoreManager.is_authority()`、
+  UI 层做纯函数 `can_request_reset()`」两条**均已按此实现**；B2 阻塞项已补自动化守护。
+  遗留：AC-B2（emoji 在所选字体下是否 tofu）、AC-B4（`返回大厅` 两条路径实机）、
+  AC-B8（双端联机）等B 栏项目**仍需窗口/双端手动实测**，未纳入自动化。
+- **变异测试 7/7 全杀**（`tools/mutation_es42.py`）：M1 面板暂停 / M2 客户端谎报可点 /
+  M3 面板自行按 kills 重算胜负 / M4 caption 对但 disabled 放行 / M5 平局显示玩家名 /
+  M6 不关同组界面 / M7 时长改自带小时格式 —— **0 存活**。
+  M3 首轮曾**存活**，原因是纪律锁只搜`"kills >"` 单条字面量，被`get("kills", 0) > 0`
+  换了写法绕过 → 已改为「代码中不得出现 `kills`/`deaths` 的任意比较运算」语义级锁。
+- **窗口实测（Vulkan · RX 6750 GRE ·非 headless）**：面板文本逐行确认为
+  `对局结束` / `🏆 你 获胜` / `本局时长 03:24` / 表 `1　玩家1　15　3　5.0`、`2　玩家2　9　7　1.3`、
+  `3　玩家3　4　11　0.4`，`[再来一局]` 房主可点、`[返回大厅]` 正常，**13/13 断言通过、渲染 0 错误**；
+  另跑 `res://scenes/main.tscn` 180 帧启动检查，**0 error**（面板挂在 HUD 下不影响主场景）。
+- 回归基线：**98 用例 / 287 断言 / 0 失败 → 134 用例 / 435 断言 / 0 失败**。
 
 ## ES-4.3 · 死亡界面 + 重生倒计时（3 s 自动）· S · ⏳ 待实施
 

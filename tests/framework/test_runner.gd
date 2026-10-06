@@ -19,6 +19,7 @@ const SUITE_SCRIPTS: Array[String] = [
 	"res://tests/suites/test_damage_routing.gd",
 	"res://tests/suites/test_kill_attribution.gd",
 	"res://tests/suites/test_scoreboard.gd",
+	"res://tests/suites/test_match_result.gd",
 	"res://tests/suites/test_invariants.gd",
 	"res://tests/suites/test_score_manager.gd",
 	"res://tests/suites/test_render_driver.gd",
