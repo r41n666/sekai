@@ -7,7 +7,7 @@
 
 ---
 
-## ES-3.1 · `ScoreManager` 节点 + 数据契约 · M · ⏳ 待实施
+## ES-3.1 · `ScoreManager` 节点 + 数据契约 · M · ✅ 已完成
 
 - **目标**：新增 `ScoreManager`，挂在 `main.tscn` 下（**每局随场景创建/销毁 → 天然复位，不用 Autoload**，`附录 A.1`）。
 - **验收标准**（`01_core_loop 附录 A.3`）：
@@ -65,3 +65,11 @@ ES-3.1（ScoreManager + 契约）
    │       └─▶ ES-3.4（同步 RPC + 信号）─▶ ES-3.5（回归）
 ```
 **EP-3 → EP-4**：EP-4 的比分板 / 结算面板消费 EP-3 的信号（ES-3.4）。
+
+---
+
+## 变更记录
+
+| 日期 | 条目 | 变更 | 说明 |
+| --- | --- | --- | --- |
+| 2026-10-06 | ES-3.1 | ⏳→✅ | `ScoreManager` 骨架 + 数据契约落地：新增 `scripts/game/score_manager.gd`（`class_name ScoreManager`，字段/信号/权威口径/状态机枚举 + 胜负判定纯逻辑）；挂 `scenes/main.tscn::ScoreManager` 节点；新增 `tests/suites/test_score_manager.gd`（12 用例 / 32 断言）并登记 runner。RPC 收发（ES-3.2/3.4）与对局驱动接线（ES-3.3）保持 ⏳。 |
