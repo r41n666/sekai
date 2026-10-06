@@ -181,7 +181,21 @@ func _hook_player(node: Node) -> void:
 	var peer_name := String(node.name)
 	node.connect("health_changed", _on_player_health_changed.bind(peer_name, authority))
 	node.connect("died", _on_player_died.bind(peer_name, authority))
+	# 击杀确认回传（G4 关键路径）：没有这条线时，「扣血正常但比分恒为 0」这类
+	# 「伤害结算对了、归因丢了」的缺陷在日志里完全不可见（2026-10-06 G4 实测踩过）。
+	if node.has_signal("remote_kill_confirmed"):
+		node.connect("remote_kill_confirmed", _on_remote_kill_confirmed)
 	_log("player_hooked", "node=%s authority=%d" % [peer_name, authority])
+
+
+## 射手端收到「你把我打死了」的确认 → **这是联机击杀真正被计分的唯一入口**。
+##   `victim` = 被击倒者节点名（= 其 peer id）。角色前缀（HOST / CLIENT id=N）标明是哪一端确认的。
+##   读法：
+##     · 有 `kill_confirmed` 且下一条 `score_changed` 比分 +1 → 归因链路通 ✔
+##     · 有 `kill_confirmed` 但比分不动 → 断裂在 ScoreManager（房主未收到 report_kill / 已 ENDED）
+##     · 完全没有 `kill_confirmed` → 根本没打到人（命中判定问题，不是计分问题）
+func _on_remote_kill_confirmed(victim_peer_name: String) -> void:
+	_log("kill_confirmed", "victim=%s" % victim_peer_name)
 
 
 ## 玩家血量变化 —— **只有本端触发的结算会打这条**。

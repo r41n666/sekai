@@ -100,8 +100,9 @@ func _slash() -> void:
 		# 与 weapon.gd::_deal_damage() 保持同一路由判据（ADR-007）：玩家身份靠能力探测，
 		# 不依赖任何显示语义组，避免近战与枪械行为分叉。
 		if collider.has_method("apply_network_damage"):
+			# 第二个实参传「开火者 peer id」：受害端权威判定致死后据此回传确认（见 player.gd）。
 			collider.apply_network_damage.rpc_id(
-				collider.get_multiplayer_authority(), damage, NetworkManager.get_my_name()
+				collider.get_multiplayer_authority(), damage, _player.get_multiplayer_authority()
 			)
 		else:
 			NetworkManager.apply_damage_to_target.rpc(

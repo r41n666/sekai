@@ -10,8 +10,14 @@ class_name PlayerController
 ## 阶段 3 联机：自己的端（multiplayer authority）响应输入、接管摄像机与鼠标；
 ## 位置与模型朝向按 ~30Hz 通过 NetworkManager 的普通 RPC 广播（不依赖场景缓存，迟到加入也能收到），
 ## 远端玩家的节点平滑跟随；FFA 个人死斗下其他玩家按「敌对目标」渲染（归 enemy 组，见 _setup_remote_player）。
-## 阶段 4：MikuModel（miku_model.gd）会自动加载 res://assets/models/miku/miku.glb（没有则保持占位胶囊），
-## 并驱动 Idle / Walk / Run / Jump 动画；模型带骨骼时武器会自动挂到右手骨骼上。
+## 远端模型或占位胶囊（没有则保持占位胶囊），并
+## 驱动 Idle / Walk / Run / Jump 动画；模型带骨骼时武器会自动挂到右手骨骼上。
+
+## ── 信号 ──
+## 联机击杀确认：**本端**确认自己击倒了一个远端玩家（由受害端 `net_confirm_kill` 回传触发）。
+##   载荷为被击倒者的节点名（= peer id）。EP-4 击杀播报 / 观测层日志据此接线。
+##   ⚠ 联机对局中击杀只在射手端触发一次（权威端则由 `weapon._report_kill_if_player` 直调路径）。
+signal remote_kill_confirmed(victim_peer_name: String)
 
 signal health_changed(current: float, maximum: float)
 signal died()
@@ -344,9 +350,36 @@ func is_aiming() -> bool:
 ## ⚠ 本方法是「玩家身份契约」（ADR-007）：`weapon.gd` / `knife.gd` 的伤害路由靠
 ##    `collider.has_method("apply_network_damage")` 判定「这是远程玩家」。请勿给
 ##    任何非玩家节点（bot / 场景物件 / UI）添加同名方法，否则会被误判为玩家、走错路由。
+##
+## `shooter_peer_id`：开火者的 peer id（由 `weapon/knife` 用 `_player.get_multiplayer_authority()`
+##   传入）。**本端是全场唯一知道血量真值的地方**（远端玩家的血量从不在射手端结算），
+##   所以「这一枪是否致死」只能在这里判定 → 归零时用 `net_confirm_kill` 回传射手端。
 @rpc("any_peer", "call_remote", "reliable")
-func apply_network_damage(amount: float, _shooter: String) -> void:
+func apply_network_damage(amount: float, shooter_peer_id: int) -> void:
+	var was_alive := health > 0.0
 	take_damage(amount)
+	# 致死确认（回传给射手端）：`was_alive` 保证一个死亡周期只发一次确认（重复命中已被
+	# `take_damage` 的 `health <= 0.0` 早退挡掉），故不会重复计分。
+	if was_alive and health <= 0.0 and shooter_peer_id > 0:
+		net_confirm_kill.rpc_id(shooter_peer_id)
+
+
+## 射手端收到「你把我打死了」的确认 → 走既有 A.4 归因路径上报（不改 A.4 契约、不改房主信任模型）。
+##
+## ⚠ 为什么确认要绕一跳回射手端，而不是由受害端直接找房主上报：
+##   A.4 `report_kill(victim_id)` 的语义是「**击杀者**上报，房主用 `get_remote_sender_id()`
+##   反查击杀者」。若改由受害端上报，房主会把 sender 当成击杀者 → 归因反了。
+##   回传确认后，「谁开的枪」由射手端自己说，与 A.4 契约一致，房间信任面不变。
+@rpc("authority", "call_remote", "reliable")
+func net_confirm_kill() -> void:
+	remote_kill_confirmed.emit(String(name))
+	var score := _score_manager()
+	if score == null:
+		return # 场景未挂 ScoreManager：静默跳过，不影响伤害结算
+	var victim_id := ScoreManager.resolve_victim_id(self)
+	if victim_id < 0:
+		return # 双保险：节点名不是 peer id（非玩家节点）→ 不上报
+	score._report_local_kill(victim_id)
 
 
 func take_damage(amount: float, _source: Node = null) -> void:
@@ -358,6 +391,14 @@ func take_damage(amount: float, _source: Node = null) -> void:
 	if health <= 0.0:
 		died.emit()
 		_enter_dead_state()
+
+
+## 取本场景的 ScoreManager（未挂载时返回 null；与 weapon.gd::_score_manager 同一取法）。
+func _score_manager() -> ScoreManager:
+	var scene := get_tree().current_scene if is_inside_tree() else null
+	if scene == null:
+		return null
+	return scene.get_node_or_null("ScoreManager") as ScoreManager
 
 
 ## 阵亡：屏蔽输入并释放鼠标（死亡界面要能点「重生」按钮）

@@ -345,6 +345,14 @@ func _hitscan() -> Vector3:
 
 
 ## 造成伤害并返回是否击杀：单机直接扣血；联机时训练靶在所有端一起结算，玩家只发给被击中的本人
+##
+## ⚠ 返回值语义（联网对局下的关键约束，勿改）：
+##   本端**只能**对「血量在自己这里结算」的目标（bot / 训练靶 / 离线）给出可信的 `killed`。
+##   远程玩家的血量只在**受害端**结算，射手端持有的 `collider.health` 永远是满值
+##   （`apply_network_damage` 是 `call_remote`，血量不回传射手端）→ 这里的 `killed` 对远程玩家
+##   **恒为 false**。所以远程玩家的击杀改由受害端权威判定后，经 `player.net_confirm_kill`
+##   回传到射手端的 `player.gd::net_confirm_kill()` 里走 `_report_local_kill`（见 player.gd）。
+##   → 千万别把 `killed` 当成「这一枪是否致命」的判据在联机下使用：那正是「比分永远 0」的成因。
 func _deal_damage(collider) -> bool:
 	var hp_before = collider.get("health")
 	if hp_before != null and float(hp_before) <= 0.0:
@@ -355,9 +363,10 @@ func _deal_damage(collider) -> bool:
 		if collider.has_method("apply_network_damage"):
 			# 远程玩家：用「能力探测」识别玩家身份（ADR-007）——apply_network_damage 是
 			# PlayerController 显式声明的玩家契约方法，与显示阵营组 friendly 彻底解耦。
-			# 只让被击中的那一端扣血（他的 HUD 与镜头震动由本端响应）
+			# 只让被击中的那一端扣血（他的 HUD 与镜头震动由本端响应）。
+			# 第二个实参传「开火者 peer id」：受害端需要它才能把致死确认回传回来。
 			collider.apply_network_damage.rpc_id(
-				collider.get_multiplayer_authority(), damage, NetworkManager.get_my_name()
+				collider.get_multiplayer_authority(), damage, _shooter_peer_id()
 			)
 		else:
 			# 训练靶等场景物件：广播到所有端一起结算，保持各端状态一致
@@ -367,6 +376,13 @@ func _deal_damage(collider) -> bool:
 	else:
 		collider.take_damage(damage)
 	return killed
+
+
+## 开火者（本端）的 peer id：远程玩家节点名 = peer id（main.gd::_make_player），
+## 而本端玩家的 multiplayer authority 就是自己 → 两端都能给出同一个值。
+## 离线（headless / 训练）时 `get_unique_id()` 为 1，与 `_spawn_point_for` 离线口径一致。
+func _shooter_peer_id() -> int:
+	return _player.get_multiplayer_authority()
 
 
 func _display_name_of(node: Object) -> String:

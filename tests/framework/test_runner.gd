@@ -17,6 +17,7 @@ const SUITE_SCRIPTS: Array[String] = [
 	"res://tests/suites/test_minimap_radius.gd",
 	"res://tests/suites/test_minimap_edge_arrow.gd",
 	"res://tests/suites/test_damage_routing.gd",
+	"res://tests/suites/test_kill_attribution.gd",
 	"res://tests/suites/test_invariants.gd",
 	"res://tests/suites/test_score_manager.gd",
 ]
