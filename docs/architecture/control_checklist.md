@@ -281,6 +281,24 @@
     - 守护：`tools/mutation_c18_probe.py`（**15 变异体：13 杀伤 + 2 守恒对照 / 0 存活 0 误杀**）。
       helper `_has_cmp_zero(code, var_name = "health")` 带 `var_name` 参数即为此。
 
+17. **⚠ C-19（Vulkan 锁）第四次复发 —— 根因已定位：Godot 编辑器进程本身会污染 `project.godot`**
+    前三次复发分别归因于「我误用 `git checkout`」「工程侧清理」「Godot 编辑器」，始终没查清机制。
+    本次（2026-10-06 23:53）拿到直接证据链：
+    - `tasklist` 显示**两个 `Godot_v4.7.2-stable_win64` 进程在运行**；
+    - `.godot/editor/editor_layout.cfg` 与 `filesystem_cache10` 的 mtime **在观测前 1~3 分钟内**；
+    - `project.godot` 被删掉 14 行（整段 Vulkan 注释 + `rendering_device/driver.windows="vulkan"`）；
+    - 同时 `scenes/hub/hub.tscn` 被改写成 4.7 新格式（加 `uid=` / `unique_id`、删 `load_steps`），
+      而同目录 `scenes/main.tscn` 仍是 `load_steps=12` 旧格式 → **只有正被编辑器打开的场景被重写**。
+    - **纪律**：
+      ① **观测/测试前先 `tasklist | findstr Godot`**，有编辑器在跑就先问用户或改用 headless；
+      ② `project.godot` **只在 headless 下被动重载**，编辑器打开时会主动写回；
+      ③ 清理 `project.godot` 的调试日志污染，**只能用 `git show HEAD:project.godot > project.godot`**，
+         绝不能用 `git checkout --`（第 11 条）；
+      ④ 任何还原动作之后**必须 `grep` 复核内容本身**（本项目实测 `git checkout` 退出码 0 但文件没还原）。
+    - 守护：`tests/suites/test_render_driver.gd` —— 本次该测试由红转绿，即为锁已回归的直接证明。
+      **但注意它只在「锁已被删且已提交/可见」时转红**；若 `project.godot` 的改动未提交，
+      `git checkout` 式的清理会把测试一起骗绿。
+
 ---
 
 ## 5. HUD 提示条与真实按键的一致性
