@@ -385,7 +385,7 @@ main.gd::_spawn_point_for(id)  main.gd:48 → SpawnPoints.get_child(id % count).
 | `_sync_player_list` | `authority, call_remote, reliable` | 服务器 → 全体：广播玩家列表 | `network_manager.gd:190` |
 | `_start_match` | `authority, call_remote, reliable` | 服务器 → 全体：切到对局场景 | `network_manager.gd:197` |
 | `_join_game_in_progress` | `authority, call_remote, reliable` | 服务器 → 单人：对局已开始，直接进场景 | `network_manager.gd:205` |
-| `net_player_state` | `any_peer, call_remote, unreliable_ordered` | 每 ~30 Hz：位置 + 模型 yaw | `network_manager.gd:213` |
+| `net_player_state` | `any_peer, call_remote, unreliable_ordered` | 每 ~30 Hz：位置 + 模型 yaw + **血量显示值**（ADR-008：搭既有广播的便车，不新开 RPC） | `network_manager.gd:213` |
 | `net_fire_effects` | `any_peer, call_remote, unreliable` | 开火：枪口火光 / 曳光弹 / 枪声 | `weapon.gd:303` |
 | `net_grenade` | `any_peer, call_remote, unreliable` | 手雷：投掷物的 origin + velocity（各端各自模拟） | `network_manager.gd:224` |
 | `apply_network_damage` | `any_peer, call_remote, reliable` | 对**玩家**的伤害：只发给被击中的那一端 | `player.gd:342` |

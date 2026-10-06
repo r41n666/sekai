@@ -21,6 +21,14 @@ signal remote_kill_confirmed(victim_peer_name: String)
 
 signal health_changed(current: float, maximum: float)
 signal died()
+
+## 远端玩家血量**显示态**变化（联机下受害端才是唯一真值，本端只接收并显示）。
+## ⚠ 与 `health_changed` **刻意分成两个信号**（不是同一个信号加 flag）：
+##   `health_changed` 的语义是「**本地权威**血量真值变了」，被本地 HUD 血条 / 死亡界面
+##   当真值消费。若把远端显示值也塞进它，任何按「血量真值变了」行事的消费方
+##   就会把「显示态」误读成「本端结算」，等于把 C-18 的两套口径重新引进来。
+##   独立信号让**来源在类型上就不可混淆**（与 A.5「不扩既有信号签名」同源裁定）。
+signal remote_health_changed(current: float, maximum: float)
 ## 切换武器 / 空手时发出（HUD 用来重新绑定）
 signal weapon_changed(weapon: Node)
 
@@ -97,6 +105,15 @@ var _net_accum := 0.0
 var _net_target_position := Vector3.ZERO
 var _net_target_yaw := 0.0
 var _net_has_target := false
+
+## ── 远端血量「显示态」（联机射手端）────────────────────────────────────────
+## ⚠ 这是**纯显示副本**，不是本端血量真值：
+##   · 权威永远在**受害端**（`apply_network_damage` 只在受害端结算，C-18 修复口径）；
+##   · 本端**不因远端掉血而本地扣血**（不写 `health`、不调 `take_damage`）；
+##   · 本端**不驱动本地死亡流程**（不发 `died`、不进 `_enter_dead_state`）——
+##     死亡/重生是受害端的权威流程，射手端不替它决定。
+## 负值 = 「尚未收到过有效广播」（此时 HUD 不画血条，避免开局先显示一条假血）。
+var _display_health := -1.0
 
 
 func _ready() -> void:
@@ -234,12 +251,14 @@ func _physics_process(delta: float) -> void:
 	var anim_ratio := clampf(move_speed / maxf(sprint_speed, 0.1), 0.0, 1.0)
 	_model.update_animation(delta, move_speed, anim_ratio, direction.length_squared() > 0.001, is_on_floor())
 
-	# 联机：按固定频率把自己的位置 / 朝向广播给其他端
+	# 联机：按固定频率把自己的位置 / 朝向 / 血量**显示值**广播给其他端
+	#   ⚠ 血量走**同一条** 30Hz 包（不额外发包，见 ADR-008），且本端是权威 → 广播的是真值。
+	#   ⚠ 频率**不得**因为加了血量而提高（`test_health_sync.gd::test_sync_interval_unchanged` 锁死）。
 	if NetworkManager.is_online:
 		_net_accum += delta
 		if _net_accum >= NET_SYNC_INTERVAL:
 			_net_accum = 0.0
-			NetworkManager.net_player_state.rpc(global_position, _model.rotation.y)
+			NetworkManager.net_player_state.rpc(global_position, _model.rotation.y, health)
 
 
 ## 姿态：按住 Ctrl 蹲下，Z 切换趴下（趴下时把模型放平，碰撞体用矮胶囊）
@@ -298,11 +317,64 @@ func _follow_network_state(delta: float) -> void:
 	_model.update_animation(delta, moved, clampf(moved / maxf(sprint_speed, 0.1), 0.0, 1.0), moved > 0.08, true)
 
 
-## 联机：收到其他端广播的位置 / 朝向（由 NetworkManager.net_player_state 调用）
-func apply_network_state(pos: Vector3, yaw: float) -> void:
+## 联机：收到其他端广播的位置 / 朝向 / 血量显示值（由 NetworkManager.net_player_state 调用）
+##
+## ⚠ **签名必须与 `network_manager.gd::net_player_state` 的调用端逐字一致**（3 个实参）。
+##   两处不一致 → `rpc_id` 实参个数不匹配 → **运行时才炸**（GDScript 不做跨文件形参校验）。
+##   `tests/suites/test_health_sync.gd::test_send_and_receive_arity_matches` 已把这条钉死。
+##
+## ⚠ **三条不可越界的边界**（每条都有测试锁住，见 ADR-008）：
+##   ① 只写 `_display_health`（显示副本），**不写 `health`、不调 `take_damage`** ——
+##      射手端本地扣血就是 C-18 重演（两套血量口径打架）。
+##   ② **不发 `died`、不调 `_enter_dead_state`** —— 死亡 / 重生是受害端的权威流程。
+##   ③ 非法值（NaN / INF / 负数 / 超 `max_health`）**整个丢弃并保持上一有效值**，
+##      而不是 clamp —— clamp 会把「协议被污染」伪装成「合理数值」，反而掩盖 bug。
+func apply_network_state(pos: Vector3, yaw: float, health_value: float) -> void:
 	_net_target_position = pos
 	_net_target_yaw = yaw
 	_net_has_target = true
+	_apply_display_health(health_value)
+
+
+## 接收远端血量显示值。**纯显示**：不写 `health`、不发 `died`、不参与任何胜负判定。
+func _apply_display_health(value: float) -> void:
+	var maximum := get_display_max_health()
+	if not _is_valid_display_health(value, maximum):
+		return # 非法值 → 丢弃，保持上一有效值（不清零、不 clamp 成「看起来合法」的错值）
+	var clamped := clamp_display_health(value, maximum)
+	if is_equal_approx(clamped, _display_health):
+		return # 无变化不发信号（HUD 无谓刷新）
+	_display_health = clamped
+	remote_health_changed.emit(clamped, maximum)
+
+
+## 远端血量显示值的合法性守卫（静态纯函数 → headless 可直接断言）。
+##   NaN / ±INF 由 `is_finite` 覆盖；负数与**超上限**同样判非法 ——
+##   超上限只可能来自协议被污染 / 两端配置分叉，此时显示一个被 clamp 过的值 =
+##   把 bug 伪装成合理数值（宁可这一帧不更新，下一包正常值自然会纠正）。
+static func _is_valid_display_health(value: float, maximum: float) -> bool:
+	if not is_finite(value):
+		return false
+	return value >= 0.0 and value <= maximum
+
+
+## 把显示值夹到 `[0, maximum]`（静态纯函数）。
+##   守卫已在**上游**挡住越界值，这里是写库前的最后一道夹取（纵深防御：
+##   万一将来有人绕过守卫直接调它，也不会把显示值写成负数 / 超上限）。
+static func clamp_display_health(value: float, maximum: float) -> float:
+	return clampf(value, 0.0, maxf(maximum, 0.0))
+
+
+## 远端血量显示值的上限来源。**故意用本端 `max_health`**：
+##   双方 `max_health` 来自同一份 `player.tscn` 的 export 默认值（场景未覆盖它）→ 跨端一致；
+##   若未来两端配了不同上限，本端按自己的上限夹取 —— 显示态以本端 UI 口径为准。
+func get_display_max_health() -> float:
+	return maxf(max_health, 1.0)
+
+
+## 远端血量显示值（<0 = 尚未收到过有效广播）。**只给 HUD 显示用**，不参与判定。
+func get_display_health() -> float:
+	return _display_health
 
 
 ## 把运动状态同步给后坐力与相机摇晃系统

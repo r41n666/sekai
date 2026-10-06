@@ -209,15 +209,22 @@ func _join_game_in_progress() -> void:
 	get_tree().change_scene_to_file(GAME_SCENE)
 
 
-## 联机：玩家位置 / 朝向的持续同步（各端按 ~30Hz 广播；用普通 RPC 而不是场景缓存，迟到加入也能收到）
+## 联机：玩家位置 / 朝向 / 血量**显示值**的持续同步（各端按 ~30Hz 广播；用普通 RPC 而不是场景缓存，迟到加入也能收到）
+##
+## ⚠ 载荷里带血量是 ADR-008 的决定：**复用这条已有的 30Hz 包**而不是另开一条 reliable RPC
+##   （另开一条 = 每次受击多发一包，且 `unreliable_ordered` 与 `reliable` 混用要额外处理顺序）。
+##   代价是「首次见到某玩家」的血条要等最多 1 帧（≤33 ms）才出现 —— 可接受。
+## ⚠ 签名与 `player.gd` 的发送端 `net_player_state.rpc(pos, yaw, health)` **必须逐字一致**：
+##   两处不一致不会编译报错，只在运行期炸（实参个数不匹配）。
+##   已由 `tests/suites/test_health_sync.gd::test_send_and_receive_arity_matches` 钉死。
 @rpc("any_peer", "call_remote", "unreliable_ordered")
-func net_player_state(pos: Vector3, yaw: float) -> void:
+func net_player_state(pos: Vector3, yaw: float, health_value: float) -> void:
 	var scene := get_tree().current_scene
 	if scene == null or not scene.has_node("Players"):
 		return
 	var node := scene.get_node_or_null("Players/%s" % multiplayer.get_remote_sender_id())
 	if node != null and node.has_method("apply_network_state"):
-		node.apply_network_state(pos, yaw)
+		node.apply_network_state(pos, yaw, health_value)
 
 
 ## 联机：手雷投掷广播（各端各自模拟一个投掷物；伤害由爆点附近的本地玩家自负）

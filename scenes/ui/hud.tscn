@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/hud.gd" id="1_hud"]
 [ext_resource type="Script" path="res://scripts/ui/crosshair.gd" id="2_crosshair"]
@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://scripts/ui/teammate_icons.gd" id="5_teammates"]
 [ext_resource type="PackedScene" path="res://scenes/ui/scoreboard.tscn" id="6_scoreboard"]
 [ext_resource type="PackedScene" path="res://scenes/ui/match_result.tscn" id="7_match_result"]
+[ext_resource type="Script" path="res://scripts/ui/enemy_health_bars.gd" id="8_enemybars"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_health_bg"]
 bg_color = Color(0.02, 0.05, 0.08, 0.55)
@@ -69,6 +70,15 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("5_teammates")
+
+[node name="EnemyHealthBars" type="Control" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("8_enemybars")
 
 [node name="HealthRoot" type="Control" parent="."]
 anchors_preset = 7

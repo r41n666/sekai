@@ -166,16 +166,31 @@
     - 换驱动后必须重跑一次窗口双端G4（headless 自检 `--headless` 不走渲染后端，
       **因此 verify PASS 并不能证明渲染没问题** —— 这是本条能潜伏至今的原因）。
 
-11. **配置文件的「清理」必须先diff**：`project.godot` 会被 Godot 自动写入
-    （如 `[debug] file_logging/*`），看着像污染就用 `git checkout -- project.godot` 还原 ——
-    ⚠ **这条命令按文件整体还原，会把同一文件里已修复的配置一并回退**。
-    本项目已踩过：commit `a3efe27` 为清理调试日志执行该命令，
+11. **配置文件的「清理」必须先diff，且`git checkout --` 报告成功 ≠ 文件真的还原了**：
+    `project.godot` 会被 Godot 自动写入（如 `[debug] file_logging/*`），看着像污染就用
+    `git checkout -- project.godot` 还原 —— ⚠ **这条命令按文件整体还原，会把同一文件里
+    已修复的配置一并回退**。本项目已踩过：commit `a3efe27` 为清理调试日志执行该命令，
     把第 10 条刚修好的 `rendering_device/driver.windows="vulkan"` 整块删掉，
     且因 `verify.sh` 走 headless 而**无人发现**。
     - 纪律：**清理前先 `git diff project.godot` 逐行确认**，只该留下污染行；
-      若diff 里混有本轮修好的内容，改用 `Edit` 精确删除单行。
+      若 diff 里混有本轮修好的内容，改用 `Edit` 精确删除单行。
     - 已加锁：`tests/suites/test_render_driver.gd` 直接读 `project.godot` 断言
       `driver.windows="vulkan"` 在位且带「勿改回」注释 —— 该行被删即测试转红。
+    - ⚠⚠ **第二次复发（2026-10-06，Task #10 远程血量同步期间）——「还原」本身也会骗人**：
+      同一行 `rendering_device/driver.windows="vulkan"` **又一次整块消失**（形态与 `a3efe27` 一致）。
+      这次的教训在**更靠后的一步**：执行 `git checkout -- project.godot` 后，
+      **命令报告成功，但文件里仍无 Vulkan 行**，且 `git status` 仍显示 `M`。
+      真正生效的是 `git show HEAD:project.godot > project.godot`。
+      - **纪律（本条真正要记的）**：**任何还原动作之后，必须用 `git diff` / `grep` 复核内容本身**，
+        不能凭「命令没报错」判定还原成功。`git checkout --` 在本项目已至少一次
+        **静默未还原**，若当时只看退出码就收工，会把一个 P0 渲染配置缺失当成已修复。
+      - **配套元纪律**：**「谁删的」与「怎么复原」是两个独立问题，不要用后者的顺利掩盖前者的未知**。
+        两次形态相同（整块消失）但来源不同 ⇒ 应按**独立事件**各自定位来源，
+        不可因为「上次是 `a3efe27` 干的」就假定这次也是同一原因。
+      - 已加**流程锁**（比断言更前置）：跑完窗口/双端实测后**必须**执行
+        `git diff project.godot` + `grep -n rendering_device project.godot` 复核，
+        **不靠记忆**。理由：跑过多次 Godot 进程本身就可能触发 `project.godot` 写入，
+        收尾时「我以为没动过它」不是证据。
 
 12. **UI 文案函数：格式串占位符数必须等于参数数**：
     GDScript 的 `"%s%s%d" % [a, b, c, d]` 在**运行期**报 "too many arguments"

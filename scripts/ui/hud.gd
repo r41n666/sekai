@@ -7,6 +7,7 @@ class_name GameHUD
 ##   Minimap        小地图（_draw() 绘制障碍物、敌我、朝向、罗盘 N）
 ##   Compass        顶部指南针
 ##   TeammateIcons  屏幕边缘队友图标（3D → 屏幕投影 + 贴边）
+##   EnemyHealthBars 敌方头顶血条（Task #10：联机下显示**受害端权威**的真实血量）
 ##   HealthRoot     生命值
 ##   AmmoPanel      弹药 / 装备
 ##   KillFeed       击杀日志
