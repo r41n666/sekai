@@ -112,7 +112,10 @@
 
 ## 8. 起始状态基线
 
-| 项目 | 值 |
+> ⚠ **本节是 S1 启动时的历史快照（kickoff baseline），非当前状态**——保留原值供审计对照。
+> **当前状态见 §9 变更记录末尾「S1 收口」条目。**
+
+| 项目 | 值（S1 启动时） |
 | --- | --- |
 | 代码 | 30 个 `.gd` / 13 场景 / 5,788 行 GDScript，功能阶段 1~5 已落地 |
 | 文档 | `design/` 2,046 行 / 10 份 + `docs/architecture/` 1,034 行 / 8 份（含 7 条 ADR）+ `production/` |
@@ -120,6 +123,8 @@
 | 设计决策 | 23 项全部拍板，0 待决 |
 | 已知缺口 | C-16（唯一功能性待实现）/ C-3 / C-6 / C-9（待评估）/ C-10 / C-11（低风险修正） |
 | 未提交 | 本轮全部文档 + 3 处代码修正（`README.md` / `minimap.gd` / `main.tscn`）**均未 git commit** |
+
+> 📌 **C-16 的当前状态**：**已实现**（`e5fae14` / `d5104de`：`player.gd::_setup_remote_player()` 已改 `add_to_group("enemy")`，伤害路由改用能力探测 `has_method("apply_network_damage")`，`ADR-007` 固化，`test_damage_routing.gd::test_friendly_group_empty_in_ffa` 覆盖 AC-F1）。上表「已知缺口」一行**仅为启动时快照，不再代表现状**。
 
 ---
 
@@ -133,3 +138,5 @@
 | 2026-10-06 | **S2 前置依赖登记**：ES-4.4（加载 3-2-1 倒计时 + 冻结输入）依赖 EP-3 补一条状态同步 RPC `sync_match_state`（房主→全端，载荷 `state, countdown_remaining`）——`01_core_loop.md` 附录 A.4 已提增补建议（待 design-strategist 确认），A.9.1 记录了客户端临时推断规则；**手雷击杀缺口**登记进 EP-5 ES-5.1（手雷击杀不计入比分，依赖权威结算落地后接入 `report_kill`） | 程基岩（engineering-lead） |
 | 2026-10-06 | **S2 前置已定稿**：design-strategist 裁定认可 `sync_match_state`（方向 A）——`01_core_loop.md` 附录 A.4 该行转正式契约、A.9.1 近似解作废（改「客户端状态跟随规则」）；新增 `01_core_loop.md §5.1` 与 `04_ux_flow.md §3.4` 倒计时 UI 规格；EP-4 ES-4.4 前置改「已确认」；`99_consistency_review.md` 追加流程教训（跨端要求须写信息来源） | 文策渊（design-strategist） |
 | 2026-10-06 | **A.5 信号形态裁定（team-lead 裁决）**：倒计时 UI 的数据源定为**新增独立信号 `countdown_updated(remaining: float)`**，**不扩** `match_state_changed` 签名。两方案曾分歧（设计侧主张扩签名 `(state, countdown_remaining)`，工程侧主张独立信号）；裁定取独立信号——既有签名是对 HUD 的契约，扩签名属破坏性变更，且状态迁移（稀疏）与倒计时（高频）语义频率不同不应共用一条信号。设计侧「信号 = 本地通知总线、UI 只绑信号不绑 RPC」的洞察予以保留。同步 `01_core_loop.md §5.1/A.5`、`04_ux_flow.md §3.4`、EP-4 ES-4.4 | 游承峰（team-lead） |
+| 2026-10-06 | **G4 观测层（临时）**：`score_manager` 4 条信号全工程零消费者 + 无任何 `print` → G4 三条断言在运行时可观测性为零。新增旁路 `scripts/debug/match_debug_probe.gd`（`MBDBG=1` 启用，默认静默、生产零副作用）+ `main.tscn` 挂节点。**S2 的 EP-4 HUD 落地后须整体删除** | 程基岩（engineering-lead） |
+| 2026-10-06 | **C-17 收口（G4 阻塞项 · 已解除）**：用户双端实测报「看不见其他玩家」。诊断（证据链排除相机/渲染/同步）确证根因为**可定位性缺失**——2 人出生相距 64m（对角 90.5m）> `world_radius 60`，而 `minimap.gd::_draw_group()` 对超距敌人 `continue` **直接丢弃**，HUD 又无方向指示。① **R1 `7923b68`**：`main.gd::spawn_index_for()` 改用「房间内排序列表下标 % count」，弃用 `id % count`（后者在 id 差为 4 倍数时**必撞同点**）；② **R2 `b370974`**：AC-3 超距敌人改为在**圆周边缘画三角箭头 ▲**（只给方位、不给距离），`world_radius` 保持 60。设计裁定：出生点按人数自适应（4=四角/3=三角/2=相邻角 64m），**雷达外敌人一律靠 AC-3**（3 人对角 90.5m 数学上不可消除）。**C-16 同步确认已实现**（`e5fae14`/`d5104de`）。测试基线 **67 用例 / 213 断言 / 0 失败**。**G4 尚待用户重跑双端实测** | 游承峰（team-lead） |
