@@ -9,7 +9,7 @@ class_name PlayerController
 ##
 ## 阶段 3 联机：自己的端（multiplayer authority）响应输入、接管摄像机与鼠标；
 ## 位置与模型朝向按 ~30Hz 通过 NetworkManager 的普通 RPC 广播（不依赖场景缓存，迟到加入也能收到），
-## 远端玩家的节点平滑跟随；其他玩家的节点以「队友」形式显示。
+## 远端玩家的节点平滑跟随；FFA 个人死斗下其他玩家按「敌对目标」渲染（归 enemy 组，见 _setup_remote_player）。
 ## 阶段 4：MikuModel（miku_model.gd）会自动加载 res://assets/models/miku/miku.glb（没有则保持占位胶囊），
 ## 并驱动 Idle / Walk / Run / Jump 动画；模型带骨骼时武器会自动挂到右手骨骼上。
 

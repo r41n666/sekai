@@ -4,8 +4,8 @@ class_name Minimap
 ##
 ## - 以玩家为中心，默认随视角旋转（`rotate_with_player = false` 则固定北向上）
 ## - 障碍物来自组 `minimap_obstacle`（取其中 BoxShape3D 碰撞体的位置与尺寸）
-## - 敌人来自组 `enemy`（红色）；队友来自组 `friendly`（绿色，仅 TDM 生效——FFA 下该组为空）
-## - 注意：远程玩家在 FFA 下归 `enemy` 组（scripts/player.gd::_setup_remote_player），按敌对渲染
+## - 敌人来自组 `enemy`（红色实心方点 □，M1）；队友来自组 `friendly`（绿色圆点 ○，仅 TDM 生效——FFA 下该组为空）
+## - 注意：远程玩家在 FFA 下归 `enemy` 组（scripts/player.gd::_setup_remote_player），按敌对方点渲染
 ## - 边缘画北向 N 标记
 ##
 ## TODO(阶段2+)：地形贴图（TextureRect / SubViewport）、缩放档位、敌人只在小地图显示已暴露目标。
@@ -89,9 +89,9 @@ func _draw() -> void:
 			var draw_size := Vector2(maxf(box_size.x, 0.6), maxf(box_size.y, 0.6)) * scale
 			draw_rect(Rect2(pos - draw_size * 0.5, draw_size), obstacle_color)
 
-		# 队友 / 敌人
-		_draw_group(ally_group, center, radius, scale, forward, right, ally_color, 2.8)
-		_draw_group(enemy_group, center, radius, scale, forward, right, enemy_color, 3.2)
+		# 队友 / 敌人（M1 形状优先：敌对 = 实心方点 □，我方 = 圆点 ○）
+		_draw_group(ally_group, center, radius, scale, forward, right, ally_color, 2.8, false)
+		_draw_group(enemy_group, center, radius, scale, forward, right, enemy_color, 3.2, true)
 
 		# 玩家（中心箭头，始终朝上）
 		var arrow := PackedVector2Array([
@@ -106,6 +106,7 @@ func _draw() -> void:
 	_draw_north_marker(center, radius, scale, forward, right)
 
 
+## 绘制一个组的标记。`hostile=true` 画实心方点（M1：敌对 □），否则画圆点（我方 ○）。
 func _draw_group(
 	group: String,
 	center: Vector2,
@@ -114,7 +115,8 @@ func _draw_group(
 	forward: Vector2,
 	right: Vector2,
 	color: Color,
-	dot_radius: float
+	dot_radius: float,
+	hostile: bool
 ) -> void:
 	for node in get_tree().get_nodes_in_group(group):
 		if not (node is Node3D):
@@ -124,8 +126,18 @@ func _draw_group(
 		var pos := _to_map((node as Node3D).global_position, center, scale, forward, right)
 		if pos.distance_to(center) > radius:
 			continue
-		draw_circle(pos, dot_radius + 1.0, Color(0.0, 0.0, 0.0, 0.55))
-		draw_circle(pos, dot_radius, color)
+		if hostile:
+			_draw_square(pos, dot_radius, color)
+		else:
+			draw_circle(pos, dot_radius + 1.0, Color(0.0, 0.0, 0.0, 0.55))
+			draw_circle(pos, dot_radius, color)
+
+
+## 实心方点（M1 敌对标记 □）：带一圈半透明描边提升暗背景下的可读性
+func _draw_square(pos: Vector2, half_size: float, color: Color) -> void:
+	var outer := half_size + 1.0
+	draw_rect(Rect2(pos - Vector2(outer, outer), Vector2(outer, outer) * 2.0), Color(0.0, 0.0, 0.0, 0.55))
+	draw_rect(Rect2(pos - Vector2(half_size, half_size), Vector2(half_size, half_size) * 2.0), color)
 
 
 func _draw_north_marker(center: Vector2, radius: float, scale: float, forward: Vector2, right: Vector2) -> void:

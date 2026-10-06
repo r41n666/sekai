@@ -37,7 +37,7 @@
 
 | # | 判据 | 验证方式 |
 | --- | --- | --- |
-| G1 | `tests/suites/test_damage_routing.gd` 由 `○ PENDING` 转为 `✓`，4 用例全绿 | 跑 `tests/test_runner.tscn` 看汇总 |
+| G1 | `tests/suites/test_damage_routing.gd` 由 `○ PENDING` 转为 `✓`，**4 用例全绿**（含 AC-F1 运行时断言 `test_friendly_group_empty_in_ffa`） | 跑 `tests/test_runner.tscn` 看汇总 |
 | G2 | 新建 `test_score_manager.gd` 覆盖「15 杀触发 / 5 分钟超时 / 平分比 deaths / 中途离开」四路径 | 同上 |
 | G3 | **全量回归 0 失败**（含既有 16 用例 / 52 断言） | 退出码 = 0 |
 | G4 | 两人联机实测：击杀计数全端一致、15 杀触发 `match_ended`、伤害只结算在受害者端 | 双进程 headless 实测 |
@@ -128,3 +128,4 @@
 | 日期 | 变更 | 作者 |
 | --- | --- | --- |
 | 2026-10-06 | 初版汇编：S1 范围 / 出口判据 G1~G5 / 执行顺序 / 风险 / S2~S5 路线 | 游承峰（主理人） |
+| 2026-10-06 | G1 判据补注：第 4 用例为 AC-F1 运行时断言 `test_friendly_group_empty_in_ffa`（此前 suite 只有 3 个源码字符串用例，运行时缺口已补）；EP-2 实测 `test_damage_routing` 4 用例 / 8 断言全绿 | 程基岩（engineering-lead） |

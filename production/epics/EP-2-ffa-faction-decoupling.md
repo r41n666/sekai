@@ -32,15 +32,17 @@
 - **验收标准**（`04_ux §6.1/§6.2`）：FFA 下 `teammate_icons` 不绘制任何图标；小地图敌对标记为**方形**。
 - **依赖**：ES-2.2。
 - **涉及文件**：`scripts/ui/minimap.gd:92`（`_draw_group(ally_group,...)`）、`scripts/ui/teammate_icons.gd:48`（`get_nodes_in_group("friendly")`）。
-- **测试证据**：截图型断言（`AC-F3`），暂列视觉回归；headless 下断言 `friendly` 组为空。
+- **实现**（2026-10-06）：`minimap.gd::_draw_group()` 新增 `hostile: bool` 参数——敌对组走 `_draw_square()`（实心方点 □，M1），友方组保留 `draw_circle()`（圆点 ○，TDM 未来用）。
+- **测试证据**：截图型断言（`AC-F3`），暂列视觉回归；headless 下运行时断言 `friendly` 组为空（见 ES-2.4 第 4 用例）。
 
 ## ES-2.4 · 启用 `test_damage_routing` 回归 · S · ✅ 已完成
 
-- **目标**：EP-2 落地后把 `tests/suites/test_damage_routing.gd` 的 `EP2_IMPLEMENTED` 置 `true`，使该 suite 从 pending 转为**启用**。
-- **验收标准**：runner 输出中该 suite 由 `○ PENDING` 变为 `✓`；退出码仍为 0。
+- **目标**：EP-2 落地后把 `tests/suites/test_damage_routing.gd` 的 `EP2_IMPLEMENTED` 置 `true`，使该 suite 从 pending 转为**启用**；并补齐 **AC-F1 运行时断言**（第 4 用例）。
+- **验收标准**：runner 输出中该 suite 由 `○ PENDING` 变为 `✓`，**4 用例**全绿；退出码仍为 0。
 - **依赖**：ES-2.1 / ES-2.2 / ES-2.3 全部完成。
-- **涉及文件**：`tests/suites/test_damage_routing.gd`（1 行常量）。
-- **测试证据**：`tests/test_runner.tscn` 汇总输出。
+- **涉及文件**：`tests/suites/test_damage_routing.gd`（`EP2_IMPLEMENTED` 常量 + 第 4 用例 `test_friendly_group_empty_in_ffa`）。
+- **第 4 用例说明**（AC-F1 = AC-A3，`04_ux §6.4` 原文「断言 FFA 对局中 `friendly` 组为空」）：**唯一运行时断言**——实例化真实 `player.tscn`，把 authority 设为非本端 id（2）→ `_ready()` 走 `_setup_remote_player()`，入树后断言 ①`is_in_group("enemy")` ②`not is_in_group("friendly")` ③`get_nodes_in_group("friendly").is_empty()`，用完 `queue_free()` 清理。前 3 个用例全是 `_read_source()` 字符串匹配，只证明「源码文本含 `has_method(...)`」，**不证明运行时 `friendly` 组为空**——本用例补上该缺口（否则有人把组归属改回 `friendly` 时前 3 用例仍全绿）。
+- **测试证据**：`tests/test_runner.tscn` 汇总输出（`test_damage_routing` 4 用例 / 8 断言）。
 
 ---
 
@@ -70,3 +72,10 @@ ES-2.1 ◀── 必须与 ES-2.2 同批提交（ADR-007：不能只改一半）
   - `scripts/ui/teammate_icons.gd`：新增 `ally_group` 导出并**显式早退**（`allies.is_empty()` → return），使「FFA 无队友图标」成为明确意图。
   - `tests/suites/test_damage_routing.gd:16`：`EP2_IMPLEMENTED` `false` → `true`，suite 启用。
   - 验证：全量回归 **31 用例 / 89 断言 / 0 失败 / exit 0**；负向验证（判据改回 `friendly`）确认 `test_weapon_routing_uses_capability_probe` **确实失败**（exit 1 / 2 断言失败），证明测试非空跑。
+
+- **2026-10-06**｜程基岩｜EP-2 补完（规格纠正后，`minimap` M1 方形 + AC-F1 运行时断言）：
+  - **纠正**：上一轮把 ES-2.3 的小地图「方形」误判为免改，实为 ES-2.3 正文要求（`04_ux §6.1` M1 明确点名 `minimap.gd::_draw_group()`）。
+  - `scripts/ui/minimap.gd::_draw_group()`：新增 `hostile: bool` 参数——敌对组 `_draw_square()`（实心方点 □），友方组保留 `draw_circle()`（○）；`_draw()` 调用处 enemy 传 `true`、ally 传 `false`。
+  - `scripts/ui/minimap.gd` 头部注释 + `scripts/player.gd` 头部注释：同步 FFA 敌对方点语义。
+  - `tests/suites/test_damage_routing.gd`：新增第 4 用例 **`test_friendly_group_empty_in_ffa`**（AC-F1 运行时断言：实例化 `player.tscn` → authority=2 → 远端分支 → 断言 enemy∈ / friendly∉ / friendly 组为空）。**补上此前 3 个纯字符串用例的运行时缺口。**
+  - 验证：全量回归 **32 用例 / 92 断言 / 0 失败 / exit 0**；对新用例做负向验证（`player.gd:139` 改回 `add_to_group("friendly")`）确认 `test_friendly_group_empty_in_ffa` **三条断言全部失败**（exit 1 / 4 失败），改回 `enemy` 后复绿。

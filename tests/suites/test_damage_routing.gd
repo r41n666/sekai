@@ -18,6 +18,7 @@ const EP2_IMPLEMENTED := true
 const WEAPON_SRC := "res://scripts/shooting/weapon.gd"
 const KNIFE_SRC := "res://scripts/shooting/knife.gd"
 const PLAYER_SRC := "res://scripts/player.gd"
+const PLAYER_SCENE := "res://scenes/player.tscn"
 
 
 func is_pending() -> bool:
@@ -56,3 +57,35 @@ func test_remote_player_joins_enemy_group_in_ffa() -> void:
 		var body := src.substr(i, 400)
 		check_true(body.find("add_to_group(\"enemy\")") >= 0,
 			"FFA 下远程玩家应加入 enemy 组（而非 friendly）")
+
+
+## AC-F1（= AC-A3）· 运行时断言：FFA 对局中 `friendly` 组为空，远程玩家进入敌对渲染集合。
+##
+## 这是本 suite 唯一的**运行时**用例（其余靠 _read_source 字符串匹配，只证明源码文本）。
+## 前 3 个用例的缺口：若有人把某处改回 add_to_group("friendly")，只要 weapon.gd 判据仍是
+## has_method，前 3 个用例照样全绿 —— AC-F1 会静默失守。本用例补上这条线。
+##
+## 做法：实例化真实 player.tscn，把 authority 设为「非本端 id」→ _ready() 走
+## _setup_remote_player() 远端分支；add_child 入树触发 _ready（suite 本身已在树中）。
+func test_friendly_group_empty_in_ffa() -> void:
+	var scene: PackedScene = load(PLAYER_SCENE) as PackedScene
+	if scene == null:
+		fail("无法加载 %s，运行时断言无法执行" % PLAYER_SCENE)
+		return
+	var remote: Node = scene.instantiate()
+	if remote == null:
+		fail("player.tscn 实例化失败")
+		return
+	# 本端（headless 单 peer）id 默认为 1；设为 2 → is_multiplayer_authority() 为假 → 远端分支
+	remote.set_multiplayer_authority(2)
+	add_child(remote) # 入树触发 _ready → _build_weapons() / _setup_remote_player()
+
+	var in_enemy: bool = remote.is_in_group("enemy")
+	var in_friendly: bool = remote.is_in_group("friendly")
+	var friendly_empty: bool = get_tree().get_nodes_in_group("friendly").is_empty()
+
+	check_true(in_enemy, "远程玩家（FFA）应加入 enemy 组")
+	check_false(in_friendly, "远程玩家（FFA）不应加入 friendly 组")
+	check_true(friendly_empty, "AC-F1：FFA 对局中 friendly 组必须为空（无绿色友军）")
+
+	remote.queue_free() # 清理，避免污染同进程后续 suite
