@@ -5,6 +5,8 @@ class_name Minimap
 ## - 以玩家为中心，默认随视角旋转（`rotate_with_player = false` 则固定北向上）
 ## - 障碍物来自组 `minimap_obstacle`（取其中 BoxShape3D 碰撞体的位置与尺寸）
 ## - 敌人来自组 `enemy`（红色实心方点 □，M1）；队友来自组 `friendly`（绿色圆点 ○，仅 TDM 生效——FFA 下该组为空）
+## - **超出 `world_radius` 的敌人 → 在圆周边缘沿「中心→敌人」方向画三角箭头（AC-3）**，
+##   只给方位、不给精确点/距离；形状用三角 △ 以区别范围内的方点 □（M1 形状编码）。
 ## - 注意：远程玩家在 FFA 下归 `enemy` 组（scripts/player.gd::_setup_remote_player），按敌对方点渲染
 ## - 边缘画北向 N 标记
 ##
@@ -107,6 +109,7 @@ func _draw() -> void:
 
 
 ## 绘制一个组的标记。`hostile=true` 画实心方点（M1：敌对 □），否则画圆点（我方 ○）。
+## AC-3：敌对目标超出 `radius` 时不丢弃，而是在圆周边缘画三角箭头指方位（只给方位）。
 func _draw_group(
 	group: String,
 	center: Vector2,
@@ -124,13 +127,67 @@ func _draw_group(
 		if node.get("alive") == false:
 			continue
 		var pos := _to_map((node as Node3D).global_position, center, scale, forward, right)
-		if pos.distance_to(center) > radius:
+		var decision := edge_marker_for(pos, center, radius)
+		if bool(decision["out_of_range"]):
+			if hostile:
+				_draw_edge_arrow(decision["edge_pos"], decision["angle"], color)
 			continue
 		if hostile:
 			_draw_square(pos, dot_radius, color)
 		else:
 			draw_circle(pos, dot_radius + 1.0, Color(0.0, 0.0, 0.0, 0.55))
 			draw_circle(pos, dot_radius, color)
+
+
+## AC-3 · 判定一个「已映射到小地图像素坐标」的目标应画在哪里。
+##
+## 抽成**纯静态函数**（入参/出参都是普通值，不碰节点与 _draw），便于 headless 单测：
+## 给定目标像素坐标 `pos`、地图中心 `center`、显示半径 `radius`，返回：
+##   - `out_of_range`：目标是否超出 radius（true → 应画边缘箭头，false → 画范围内标记）
+##   - `edge_pos`：箭头应落的位置（半径 `radius - EDGE_ARROW_INSET`，沿 center→pos 方向）
+##   - `angle`：center→pos 的方向角（弧度，供箭头朝向；也方便测试断言方位）
+##
+## 注意：`radius` 在 `_draw()` 里是 `min(size) * 0.5 - 2.0` 的**像素**半径；测试可直接
+## 传任意数值。两参数几何自洽即可，不依赖真实视口尺寸。
+static func edge_marker_for(pos: Vector2, center: Vector2, radius: float) -> Dictionary:
+	var offset := pos - center
+	var dist := offset.length()
+	if dist <= radius:
+		return {"out_of_range": false, "edge_pos": pos, "angle": 0.0}
+	# 方向：center → 目标；目标恰在中心（dist≈0）时不画箭头（无方位可言）。
+	if dist < 0.0001:
+		return {"out_of_range": false, "edge_pos": pos, "angle": 0.0}
+	var dir := offset / dist
+	var edge_pos := center + dir * maxf(radius - EDGE_ARROW_INSET, 0.0)
+	return {"out_of_range": true, "edge_pos": edge_pos, "angle": atan2(dir.y, dir.x)}
+
+
+## 边缘三角箭头相对圆周的内缩像素（避免和圆边框糊在一起）。
+const EDGE_ARROW_INSET := 2.0
+## 箭头三角形尺寸（像素）：底半宽 / 顶点到背边的长。
+const EDGE_ARROW_HALF_BASE := 4.5
+const EDGE_ARROW_LENGTH := 9.0
+
+
+## AC-3 · 在圆周边缘画一个指向 `angle` 方向的三角箭头（形状 △，区别范围内方点 □）。
+## 颜色沿用 enemy_color（#FF4738）。带一圈深色描边提升暗背景可读性。
+func _draw_edge_arrow(edge_pos: Vector2, angle: float, color: Color) -> void:
+	var dir := Vector2(cos(angle), sin(angle))
+	var side := Vector2(-dir.y, dir.x)
+	var tip := edge_pos + dir * EDGE_ARROW_LENGTH
+	var base_center := edge_pos - dir * EDGE_ARROW_LENGTH
+	var left := base_center + side * EDGE_ARROW_HALF_BASE
+	var right := base_center - side * EDGE_ARROW_HALF_BASE
+	# 描边（先画略大的深色三角，再叠主色）
+	var outline_scale := 1.35
+	var o_tip := edge_pos + dir * EDGE_ARROW_LENGTH * outline_scale
+	var o_base := edge_pos - dir * EDGE_ARROW_LENGTH * outline_scale
+	var o_left := o_base + side * EDGE_ARROW_HALF_BASE * outline_scale
+	var o_right := o_base - side * EDGE_ARROW_HALF_BASE * outline_scale
+	draw_colored_polygon(
+		PackedVector2Array([o_tip, o_left, o_right]), Color(0.0, 0.0, 0.0, 0.55)
+	)
+	draw_colored_polygon(PackedVector2Array([tip, left, right]), color)
 
 
 ## 实心方点（M1 敌对标记 □）：带一圈半透明描边提升暗背景下的可读性
