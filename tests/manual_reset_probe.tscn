@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cresetprobe01"]
+
+[ext_resource type="Script" path="res://tests/manual_reset_probe.gd" id="1_probe"]
+
+[node name="ResetProbe" type="Node"]
+script = ExtResource("1_probe")

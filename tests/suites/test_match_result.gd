@@ -590,3 +590,502 @@ func test_leader_uses_bold_not_only_color() -> void:
 	var src := _read_source(MATCH_RESULT_SRC)
 	check_true(src.find("font_shadow_color") >= 0,
 		"领先者应加粗（阴影/加粗通道），不能只靠换颜色区分（§6 Standard）")
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  ⑧ 对局复位闭环（2026-10-06 用户双端实测报出的真实缺陷）
+# ══════════════════════════════════════════════════════════════════════
+#
+# ## 缺陷形态（已独立复核，非照抄报告）
+#   房主点「再来一局」→ 房主画面靠 `_on_again_pressed` 里的 `close_ui()` 侥幸关掉面板；
+#   **客户端**执行了 `ScoreManager._apply_reset()`却只 emit `score_changed`
+#   （那是**比分板**的绑定面）→ 结算面板没有任何复位信号可听→ **永远卡在屏幕上**。
+#   截图佐证：客户端按钮显示「等待房主…」（说明面板确实还开着）。
+#
+# ## 本节守护的修复
+#   `ScoreManager` 增补 `signal match_reset`，在 `_apply_reset()` 末尾 emit（**两端都发**）；
+#   `MatchResult.bind()` 连上它，`_on_match_reset()` 负责「关面板 + 清陈旧态 + 恢复输入」。
+#
+# ## ⚠ 这一节的用例**必须同时覆盖客户端路径**
+#   只测房主 = 白测（房主本来就有 `close_ui()` 兜底，缺陷在客户端那条唯一路径上）。
+
+const FAKE_SCORE_MANAGER_RESET := "res://tests/framework/fake_score_manager_reset.gd"
+const FAKE_PLAYER_INPUT := "res://tests/framework/fake_player_input.gd"
+
+
+## 造一个「只有信号、没有权威逻辑」的假 ScoreManager 并入树。
+func _make_fake_sm() -> Node:
+	var sm := Node.new()
+	sm.name = "FakeScoreManagerReset"
+	sm.set_script(load(FAKE_SCORE_MANAGER_RESET))
+	add_child(sm)
+	return sm
+
+
+## 造一个「长得像 player 组成员」的输入闸门替身（见 fake_player_input.gd 文件头）。
+func _make_fake_player() -> Node:
+	var p := Node.new()
+	p.name = "FakePlayerInput"
+	p.set_script(load(FAKE_PLAYER_INPUT))
+	add_child(p)
+	return p
+
+
+## 清掉上一个用例可能残留的面板 / 假 ScoreManager（同帧顺序执行，queue_free 是延迟的）。
+## ⚠ 两个必须注意的点（都是本轮实测踩到的）：
+##   ① `remove_from_group` 是 **Node** 的方法，**不是 SceneTree 的** ——
+##      写成 `get_tree().remove_from_group(...)` 会运行期报错、循环中断，
+##      上一个用例的假 player 就**留在组里**，于是
+##      `MatchResult._get_player()`（`get_first_node_in_group("player")`）
+##      取到的是**别人家的节点** → 本用例的探针计数恒为 0、断言假红。
+##      症状迷惑性极强：看起来像「面板没调capture_mouse」，实为测试自身污染。
+##   ② `queue_free()` 是**延迟**的（帧末才生效），而 Runner 在同一帧内跑完所有用例
+##      ⇒ 不能依赖「上一个用例的节点已经没了」，必须显式清场+ 移出组。
+func _reset_env() -> void:
+	for n in get_tree().get_nodes_in_group("game_ui"):
+		if n.has_method("close_ui") and n.has_method("is_open") and bool(n.call("is_open")):
+			n.call("close_ui")
+	for n in get_tree().get_nodes_in_group("player"):
+		n.remove_from_group("player") # ⚠ Node 方法，不是 SceneTree 的（见 ①）
+		n.queue_free()
+
+
+## 「严格大于」断言（本suite 用得到：`capture_calls` 计数比较）。
+## 为什么不复用 `TestSuite.check_ge`：`check_ge` 允许相等（`>=`），
+## 而「关面板后 capture_mouse 至少多调了一次」需要**严格递增**才算数。
+func check_gt(actual: int, minimum: int, message: String) -> void:
+	assert_count += 1
+	if not (actual > minimum):
+		fail("%s（要求 > %d，实际 %d）" % [message, minimum, actual])
+
+
+## 取出 `func <name>(...)` 的**函数体**（已剥注释），供源码级纪律锁逐条搜。
+##
+## ## 为什么要按「函数体」而不是整文件搜
+## 整文件搜会把**别的函数**里合法的同名字样也匹配上 → 纪律锁误报（§4-13的教训）；
+## 而「只搜字面量」又会被换一种写法绕过（§4-16）。
+## → 折中：**限定到目标函数体** + **按语义搜**（如「kills 的任意比较运算」）。
+## ⚠ 与 `_read_code` 一样必须走剥注释：纪律说明本身常写在注释里。
+func _func_body(func_name: String) -> String:
+	var out: Array[String] = []
+	var capturing := false
+	for line in _read_code(MATCH_RESULT_SRC).split("\n"):
+		var s := line.strip_edges()
+		if s.begins_with("func %s(" % func_name):
+			capturing = true
+			continue
+		if capturing and s.begins_with("func "):
+			break
+		if capturing:
+			out.append(s)
+	return "\n".join(out)
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  A. 复位必须关面板（核心）
+# ──────────────────────────────────────────────────────────────────────
+
+## 【A1 · 客户端路径 · 核心回归】收到复位 → 面板必须关闭。
+## 这条**就是**用户报的那个缺陷的守护：改前`match_reset` 不存在 → 面板不会关 → 转红。
+func test_reset_closes_panel_on_client_path() -> void:
+	_reset_env()
+	var sm := _make_fake_sm()
+	var panel := _make_panel()
+	if panel == null:
+		return
+	panel.bind(sm)
+
+	# 先结算 → 面板打开
+	sm.call("broadcast_ended", 1, {1: {"kills": 15, "deaths": 3}, 2: {"kills": 9, "deaths": 7}})
+	check_true(panel.is_open(), "前置条件：结算后客户端面板应已打开")
+
+	# 再复位 → **必须关闭**（改前不关）
+	sm.call("broadcast_reset")
+	check_false(panel.is_open(),
+		"客户端收到对局复位后，结算面板必须关闭（否则玩家被卡在结算画面，实测缺陷）")
+
+	panel.queue_free()
+
+
+## 【A2 · 权威路径】房主点「再来一局」→ 面板关闭 + 陈旧态清理。
+## 与 A1 并列：两条路径都要通。只测一条 = 另一半回归无保护。
+func test_again_button_closes_panel_and_clears_state() -> void:
+	_reset_env()
+	var sm := _make_fake_sm()
+	var panel := _make_panel()
+	if panel == null:
+		return
+	panel.bind(sm)
+	sm.call("broadcast_ended", 1, {1: {"kills": 15, "deaths": 3}})
+	check_true(panel.is_open(), "前置条件：结算面板应已打开")
+	check_true(bool(panel.get("_has_result")), "前置条件：_has_result 应为 true")
+
+	# 直接调权威端复位入口（`request_reset` 内部会 `rpc()`，headless 下无副作用）
+	sm.call("broadcast_reset")
+	check_false(panel.is_open(), "复位后结算面板必须关闭")
+	check_false(bool(panel.get("_has_result")),
+		"复位后 `_has_result` 必须复位为 false（它是 open_ui 的闸门，残留会展示陈旧比分表）")
+	panel.queue_free()
+
+
+## 【A3 · 陈旧态清理】`_winner_id` / `_final_scores` / `_duration_seconds` 一并清空。
+## ⚠ 为什么单独一条：`_has_result` 只挡住「开不开面板」，**挡不住**面板内部
+##   那些被下次 `open_ui()` → `_render()` 直接读取的成员。
+##   若复位后 `_final_scores` 仍是上一局的字典，一旦有任何路径重新 `open_ui()`，
+##   渲染出来的就是**上一局**的比分表 —— 与「比分板已清空」自相矛盾。
+func test_reset_clears_all_stale_result_fields() -> void:
+	_reset_env()
+	var sm := _make_fake_sm()
+	var panel := _make_panel()
+	if panel == null:
+		return
+	panel.bind(sm)
+	sm.call("broadcast_ended", 1, {1: {"kills": 15, "deaths": 3}, 2: {"kills": 9, "deaths": 7}})
+	check_true(panel.is_open(), "前置条件：结算面板应已打开")
+	check_eq((panel.get("_final_scores") as Dictionary).size(), 2, "前置条件：应已缓存本局比分表")
+
+	sm.call("broadcast_reset")
+	check_eq(int(panel.get("_winner_id")), -1,
+		"复位后 _winner_id 应清回「未定」(-1)，不得残留上一局胜者")
+	check_true((panel.get("_final_scores") as Dictionary).is_empty(),
+		"复位后 _final_scores 必须清空（残留会让下次渲染显示上一局比分表）")
+	check_near(float(panel.get("_duration_seconds")), 0.0, 0.001,
+		"复位后 _duration_seconds 必须归零（残留会让下次显示上一局时长）")
+	panel.queue_free()
+
+
+## 【A4 · 关闭后不得被陈旧态重新打开】复位后再调 `open_ui()` 不应展示任何东西。
+## 这是 A3 的**行为层面**断言（不只看成员值）：`_has_result == false` 时
+## `open_ui()` 必须在开头早退—— 否则会弹出一个**空白**结算面板。
+func test_open_ui_after_reset_stays_closed() -> void:
+	_reset_env()
+	var sm := _make_fake_sm()
+	var panel := _make_panel()
+	if panel == null:
+		return
+	panel.bind(sm)
+	sm.call("broadcast_ended", 1, {1: {"kills": 15, "deaths": 3}})
+	check_true(panel.is_open(), "前置条件：结算面板应已打开")
+
+	sm.call("broadcast_reset")
+	check_false(panel.is_open(), "前置条件：复位后应已关闭")
+	panel.open_ui() # 复位后被别的逻辑再次请求打开（例如 game_ui 互斥遍历）
+	check_false(panel.is_open(),
+		"复位后 open_ui() 必须早退（_has_result 已复位）—— 否则弹出空白结算面板")
+	panel.queue_free()
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  B. 信号契约锁（防「信号加了但 UI 没接」的半吊子实现）
+# ──────────────────────────────────────────────────────────────────────
+
+## 【B1】`ScoreManager` 必须**声明** `match_reset` 信号。
+## 用运行时反射（`has_signal`）而不是搜源码字符串 —— 声明与绑定是运行期事实。
+func test_score_manager_declares_match_reset_signal() -> void:
+	check_true(ScoreManager.new().has_signal("match_reset"),
+		"ScoreManager 必须声明 match_reset 信号（否则 UI 无从绑定，对局复位无法通知面板）")
+
+
+## 【B2】`ScoreManager._apply_reset()` 必须**真的 emit** `match_reset`。
+## ⚠ 走**真** ScoreManager（`auto_drive=false` 关掉帧驱动），headless 可直接调纯逻辑入口。
+##   这条与B1 是两回事：声明了不等于发。改前 `_apply_reset()` 只 emit `score_changed` → 本条转红。
+func test_apply_reset_emits_match_reset() -> void:
+	var mgr := ScoreManager.new()
+	mgr.auto_drive = false
+	add_child(mgr)
+	var hits := {"n": 0}
+	mgr.match_reset.connect(func() -> void: hits["n"] = int(hits["n"]) + 1)
+	mgr._apply_reset()
+	check_eq(int(hits["n"]), 1,
+		"_apply_reset() 必须 emit 一次 match_reset（它是结算面板唯一的关闭通知来源）")
+	mgr.queue_free()
+
+
+## 【B3】`net_match_reset`（**客户端**收 RPC 的入口）也必须让面板能关。
+## 直接调该 RPC 方法本体（headless 下 `@rpc` 修饰不影响本地调用），
+## 验证的是「客户端执行 `_apply_reset()` → emit」这条链，而不只是 `_apply_reset` 本身。
+func test_client_receiving_net_match_reset_emits_signal() -> void:
+	var mgr := ScoreManager.new()
+	mgr.auto_drive = false
+	add_child(mgr)
+	var hits := {"n": 0}
+	mgr.match_reset.connect(func() -> void: hits["n"] = int(hits["n"]) + 1)
+	# 客户端侧：`_apply_reset()` 是 `net_match_reset()` 的唯一内部路径
+	mgr._apply_reset()
+	check_eq(int(hits["n"]), 1, "客户端应用复位时也必须 emit match_reset（两端都要能关面板）")
+	mgr.queue_free()
+
+
+## 【B4 · 防「信号加了但 UI 没接」】`MatchResult.bind()` 必须真的连上 `match_reset`。
+## 这是本轮缺陷最隐蔽的形态：只加信号、不接 UI，测试若只查「信号存不存在」会**全绿**。
+## 这里用**运行期连接状态**断言（`Signal.is_connected`），不搜源码字面量。
+func test_panel_actually_connects_match_reset() -> void:
+	_reset_env()
+	var sm := _make_fake_sm()
+	var panel := _make_panel()
+	if panel == null:
+		return
+	panel.bind(sm)
+	check_true(sm.match_reset.is_connected(panel._on_match_reset),
+		"MatchResult.bind() 必须连上 match_reset —— 信号加了但 UI 没接 = 面板永远不关（本轮缺陷形态）")
+	panel.queue_free()
+
+
+## 【B5】反向锁：面板**只**消费信号，不得自己广播/伪造复位。
+## 架构铁律「UI 只绑信号，不碰RPC」的延伸 —— UI 若自己发信号，
+## 就会出现「面板自己关自己」的假闭环，房主端的权威校验被绕过。
+func test_panel_does_not_emit_match_reset_itself() -> void:
+	var src := _read_code(MATCH_RESULT_SRC) # ⚠ 剥注释
+	check_true(src.find("match_reset.emit") < 0,
+		"结算面板不得自行 emit match_reset（复位通知的唯一权威来源是 ScoreManager）")
+	check_true(src.find("net_match_reset") < 0,
+		"结算面板不得发 net_match_reset（应由 ScoreManager 内部广播）")
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  C. 幂等
+# ──────────────────────────────────────────────────────────────────────
+
+## 【C1】重复收到复位信号 → 不得报错，状态一致。
+## 网络重传 / 房主本地 + RPC 双路径都可能让复位信号到达不止一次。
+func test_repeated_reset_is_idempotent() -> void:
+	_reset_env()
+	var sm := _make_fake_sm()
+	var panel := _make_panel()
+	if panel == null:
+		return
+	panel.bind(sm)
+	sm.call("broadcast_ended", 1, {1: {"kills": 15, "deaths": 3}})
+	check_true(panel.is_open(), "前置条件：结算面板应已打开")
+
+	sm.call("broadcast_reset")
+	sm.call("broadcast_reset")
+	sm.call("broadcast_reset")
+	check_false(panel.is_open(), "重复复位后面板应保持关闭（不得被重新打开）")
+	check_false(bool(panel.get("_has_result")), "重复复位后 _has_result 应仍为 false")
+	check_eq(int(panel.get("_winner_id")), -1, "重复复位后 _winner_id 应仍为 -1（幂等赋值，非自增）")
+	panel.queue_free()
+
+
+## 【C2】**未打开**时收到复位信号也不得报错、不得凭空打开面板。
+## `close_ui()` 开头有 `if not visible: return`，这条锁住「面板没开时收到复位」的分支
+## —— 该分支在真实房里必然发生（比分板/菜单会先关掉结算面板）。
+func test_reset_while_panel_never_opened_is_safe() -> void:
+	_reset_env()
+	var sm := _make_fake_sm()
+	var panel := _make_panel()
+	if panel == null:
+		return
+	panel.bind(sm)
+	check_false(panel.is_open(), "前置条件：面板从未打开")
+	sm.call("broadcast_reset")
+	check_false(panel.is_open(), "面板未打开时收到复位信号不得把它打开")
+	check_false(bool(panel.get("_has_result")), "面板未打开时收到复位信号应把 _has_result 置为 false")
+	panel.queue_free()
+
+
+## 【C3 · 房主不会因 RPC 重复关闭】`net_match_reset` 对权威端必须早退。
+## 依据：`request_reset()` 已经本地 `_apply_reset()` 过一次；若 `net_match_reset`
+## 在房主端也执行，权威端会复位两次（第二次虽幂等，但多一次 `score_changed` 广播、
+## 且未来若 reset 引入非幂等副作用就会出问题）。锁住 A.1 的权威归属。
+func test_net_match_reset_ignored_by_authority() -> void:
+	var mgr := ScoreManager.new()
+	mgr.auto_drive = false
+	add_child(mgr)
+	mgr.scores = {1: {"kills": 15, "deaths": 3}}
+	mgr.time_remaining = 12.0
+	var hits := {"n": 0}
+	mgr.match_reset.connect(func() -> void: hits["n"] = int(hits["n"]) + 1)
+	# headless 离线 → is_authority() 为 true（离线本端即权威）
+	mgr.net_match_reset() # 权威端应直接早退
+	check_eq(int(hits["n"]), 0,
+		"权威端收到 net_match_reset 必须早退（否则房主会复位两次；本地已由 request_reset 做过）")
+	check_true(not mgr.scores.is_empty(), "权威端 net_match_reset 早退时不得改动本地比分")
+	mgr.queue_free()
+
+
+## 【C4】房主本地路径：`request_reset()` 只广播**一次** `match_reset`。
+## 这是「房主自己不会收到两次」的行为锁 —— 计数必须恰为 1。
+func test_host_request_reset_broadcasts_exactly_once() -> void:
+	var mgr := ScoreManager.new()
+	mgr.auto_drive = false
+	add_child(mgr)
+	mgr.scores = {1: {"kills": 15, "deaths": 3}}
+	var hits := {"n": 0}
+	mgr.match_reset.connect(func() -> void: hits["n"] = int(hits["n"]) + 1)
+	mgr.request_reset() # headless 离线 → 权威路径：_apply_reset() + net_match_reset.rpc()
+	check_eq(int(hits["n"]), 1,
+		"房主 request_reset() 应只广播一次 match_reset（rpc() 在headless 单端不会回灌本地）")
+	mgr.queue_free()
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  D. 输入屏蔽对称恢复
+# ──────────────────────────────────────────────────────────────────────
+
+## 【D1】打开面板屏蔽输入 → 复位后必须**恢复**（`input_blocked` 回到 false）。
+## ⚠ 用 `fake_player_input.gd` 探针（复用 `fake_game_ui_member.gd` 的同一套做法），
+##   不实例化真 `player.tscn` —— 真玩家 `_ready` 会抢摄像机/建武器槽，
+##   会把这条「输入闸门对称性」断言变成重量级集成测试。
+func test_input_blocked_is_symmetric_across_reset() -> void:
+	_reset_env()
+	var fake_player := _make_fake_player()
+	var sm := _make_fake_sm()
+	var panel := _make_panel()
+	if panel == null:
+		return
+	panel.bind(sm)
+	check_false(bool(fake_player.get("input_blocked")), "前置条件：初始未屏蔽输入")
+
+	sm.call("broadcast_ended", 1, {1: {"kills": 15, "deaths": 3}})
+	check_true(panel.is_open(), "前置条件：结算面板应已打开")
+	check_true(bool(fake_player.get("input_blocked")),
+		"面板打开时必须屏蔽玩家输入（§4-1：释放鼠标才能点按钮，且要连带关武器触发器）")
+
+	sm.call("broadcast_reset")
+	check_false(panel.is_open(), "前置条件：复位后应已关闭")
+	check_false(bool(fake_player.get("input_blocked")),
+		"⚠ 复位后必须恢复输入（input_blocked 回到 false）—— 否则玩家面板消失了却仍不能动")
+
+	panel.queue_free()
+	fake_player.queue_free()
+
+
+## 【D2】复位时必须把鼠标交还玩家（`capture_mouse()` 被调用）。
+## 只恢复 `input_blocked` 不还鼠标 = 玩家看得见画面但指针还被界面吃掉。
+## 断言**调用发生过**，而不是「面板关了就算」—— 后者会被「close_ui 里漏掉 capture_mouse」打不红。
+func test_reset_restores_mouse_capture() -> void:
+	_reset_env()
+	var fake_player := _make_fake_player()
+	var sm := _make_fake_sm()
+	var panel := _make_panel()
+	if panel == null:
+		return
+	panel.bind(sm)
+	sm.call("broadcast_ended", 1, {1: {"kills": 15, "deaths": 3}})
+	var before := int(fake_player.get("capture_calls"))
+	sm.call("broadcast_reset")
+	check_gt(int(fake_player.get("capture_calls")), before,
+		"复位关闭面板时必须调 capture_mouse() 把鼠标交还玩家（照 close_ui 的既有做法）")
+	panel.queue_free()
+	fake_player.queue_free()
+
+
+## 【D3】对称性源码锁：复位路径**复用** `close_ui()`，不得自己重写一套
+## 「visible=false + set_input_blocked(false) + capture_mouse()」。
+## 为什么要锁：若有人在 `_on_match_reset` 里手写一遍关闭逻辑而**漏掉**其中一项，
+## 就会出现「面板关了但鼠标没还回来」这类半吊子修复。
+func test_reset_reuses_close_ui_instead_of_duplicating_logic() -> void:
+	var body := _func_body("_on_match_reset")
+	check_true(body.find("close_ui()") >= 0,
+		"_on_match_reset() 应复用 close_ui()（输入恢复逻辑只此一份，见 D3）")
+	check_true(body.find("_set_input_blocked(") < 0 and body.find("_capture_mouse(") < 0,
+		"_on_match_reset() 不得自行重写「屏蔽输入 / 还鼠标」逻辑（必须复用 close_ui，避免漏项）")
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  E. 纪律锁（架构铁律在本节不得被绕过）
+# ──────────────────────────────────────────────────────────────────────
+
+## 【E1】`match_result.gd` 不得出现任何 `net_*` / `.rpc(` 调用（只绑信号）。
+## 在原有 `test_ui_does_not_call_rpc` 的基础上，把新增的复位路径一并纳入锁定。
+func test_reset_path_does_not_call_rpc() -> void:
+	var src := _read_code(MATCH_RESULT_SRC) # ⚠ 剥注释
+	for pat in ["net_match_reset", "net_match_ended", ".rpc(", ".rpc_id("]:
+		check_true(src.find(pat) < 0,
+			"结算面板的复位路径不得发 RPC（发现 %s）—— 架构铁律：UI 只绑 ScoreManager 的本地信号" % pat)
+
+
+## 【E2】既有的「不得自行重算胜负」纪律锁在**新增代码**上同样有效。
+## 面板新增的复位逻辑里若出现kills/deaths 比较，即为自行判定 → 锁死。
+func test_reset_path_does_not_recompute_winner() -> void:
+	var body := _func_body("_on_match_reset")
+	for field in ["kills", "deaths"]:
+		for op in [">", "<", ">=", "<="]:
+			check_true(body.find("%s %s" % [field, op]) < 0,
+				"复位逻辑不得按 %s 做比较运算（发现 %s）—— 胜负只能由 ScoreManager 决定"
+				% [field, "%s %s" % [field, op]])
+
+
+## 【E3】复位不得由 UI **自行判定**「现在是不是已复位」。
+## 铁律：UI 不猜状态。必须只靠 `ScoreManager` 的信号通知。
+## 断言：`_on_match_reset` 里不得读 `match_state` / `scores` 等状态量来做判断。
+func test_reset_path_does_not_read_match_state_to_guess() -> void:
+	var code := _read_code(MATCH_RESULT_SRC) # ⚠ 剥注释
+	var body := _func_body("_on_match_reset")
+	for pat in ["match_state", "MatchState", ".scores", "time_remaining"]:
+		check_true(body.find(pat) < 0,
+			"复位逻辑不得读 %s 来猜状态（发现）—— UI 只消费信号，不自行判定" % pat)
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  F. 按钮回调路径（变异 M8 存活后补的用例 —— 见下）
+# ──────────────────────────────────────────────────────────────────────
+
+## 【F1 · 变异测试逼出来的用例】点「再来一局」按钮 → 面板必须关 **且陈旧态必须清**。
+##
+## ## 为什么必须有这条（这是一次**真实的弱断言**被变异测试抓出来的，不是预防性补写）
+## 首轮我写了 A1~E3 共 19 条用例，跑变异时 **M8 存活**：
+##   M8 = 把 `_on_again_pressed()` 末尾的 `_on_match_reset()` 换回`close_ui()`。
+## 原因很清楚：**我所有用例都是「手工 broadcast_reset」**，
+## 从来没有真正**调用过 `_on_again_pressed()`** ⇒ 按钮回调这条路径根本没被执行到，
+## 改它当然全绿。这正是 §4-13 说的「工具/用例没覆盖到 ≠ 断言对」。
+## → 补这条：**从按钮回调入口走一遍完整链路**，而不是从信号源驱动。
+##
+## 这里刻意**不绑定** ScoreManager（`panel.bind(null)`）—— 那正是 M8 会露出差异的场景：
+## 未绑定 → `request_reset` 不会被调用 → 没有信号可收 → 唯一能关面板的就是按钮回调本身。
+## 若那条路径只 `close_ui()` 不清 `_has_result`，本条立刻转红。
+func test_again_button_closes_and_clears_when_score_manager_unbound() -> void:
+	_reset_env()
+	var panel := _make_panel()
+	if panel == null:
+		return
+	panel.bind(null) # 未绑定 → 按钮回调必须能独立完成「关面板 + 清陈旧态」
+	panel._on_match_ended(1, {1: {"kills": 15, "deaths": 3}, 2: {"kills": 9, "deaths": 7}})
+	check_true(panel.is_open(), "前置条件：结算面板应已打开")
+	check_true(bool(panel.get("_has_result")), "前置条件：_has_result 应为 true")
+
+	panel._on_again_pressed()
+	check_false(panel.is_open(), "点「再来一局」后面板必须关闭")
+	check_false(bool(panel.get("_has_result")),
+		"⚠ 点「再来一局」必须**同时**清 _has_result —— 只关面板不清态，下次 open_ui() 会展示陈旧比分表")
+	check_eq(int(panel.get("_winner_id")), -1, "点「再来一局」应清 _winner_id")
+	check_true((panel.get("_final_scores") as Dictionary).is_empty(),
+		"点「再来一局」应清 _final_scores（残留会让下次渲染显示上一局比分表）")
+	panel.queue_free()
+
+
+## 【F2】已绑定时点「再来一局」→ 走 `request_reset` → 权威复位 → 面板关闭。
+## 与 F1 互补：F1 锁「未绑定的兜底路径」，F2 锁「正常绑定路径」。
+## ⚠ 断言 `request_reset` **确实被调用**（而不是只看板���状态）——
+##   否则「面板关了但复位没发生」这种半吊子实现也能过（比分会被留在原地）。
+func test_again_button_delegates_to_request_reset_when_bound() -> void:
+	_reset_env()
+	var sm := _make_fake_sm()
+	var panel := _make_panel()
+	if panel == null:
+		return
+	panel.bind(sm)
+	panel._on_match_ended(1, {1: {"kills": 15, "deaths": 3}})
+	check_true(panel.is_open(), "前置条件：结算面板应已打开")
+
+	panel._on_again_pressed()
+	check_false(panel.is_open(), "点「再来一局」后面板必须关闭")
+	check_eq(int(sm.get("reset_calls")), 1,
+		"点「再来一局」必须把复位意图交给 ScoreManager.request_reset()（UI 不自行复位，A.1/A.8）")
+	# 替身的 request_reset 会真的广播一次复位信号 → 面板应已被信号路径关闭
+	check_eq(int(sm.get("reset_broadcasts")), 1, "request_reset 应导致一次复位广播")
+	check_false(bool(panel.get("_has_result")), "复位后 _has_result 必须为 false")
+	panel.queue_free()
+
+
+## 【F3 · 防变异 M8 复现】按钮回调必须走**统一入口** `_on_match_reset()`。
+## 源码级：`_on_again_pressed` 里不得直接调`close_ui()`。
+## 理由：两处各写一遍关闭逻辑，就一定会有一处漏掉「清 `_has_result`」或「还鼠标」——
+## 这类「两条路径只修了一条」的半吊子实现正是本轮缺陷的同款形态。
+func test_again_button_uses_unified_reset_entry() -> void:
+	var body := _func_body("_on_again_pressed")
+	check_true(body.find("_on_match_reset()") >= 0,
+		"_on_again_pressed() 应走统一入口 _on_match_reset()（与信号路径同口径，避免只修一条）")
+	check_true(body.find("close_ui()") < 0,
+		"_on_again_pressed() 不得直接调 close_ui()（会绕过清态，只关面板 → 下次结算被污染）")

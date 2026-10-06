@@ -70,6 +70,29 @@ signal match_ended(winner_id: int, final_scores: Dictionary)
 ## 载荷语义与 A.4 `sync_match_state` 的 `countdown_remaining` 一致。
 ## ⚠ 仅在 COUNTDOWN 期间有意义；离开 COUNTDOWN（进 LIVE / ENDED / IDLE）后**停止 emit**。
 signal countdown_updated(remaining: float)
+##
+## ── A.5 增补（2026-10-06，EP-3 范围内的**增补**，非契约变更）──
+## 对局已复位（`END → IDLE` 那一跳的「对局结束」侧事件），广播给 UI 消费。
+##
+## ## 为什么必须单列一条（这是**实测缺陷**逼出来的，不是预想）
+## `_apply_reset()` 复位时只 emit 了 `score_changed`（那是**比分板**的绑定面）。
+## 结算面板 `MatchResult` 监听的是 `match_ended`，复位时**没有任何信号通知它** ⇒
+##   房主点「再来一局」→ 房主本端靠 `close_ui()` 关了面板，
+##   **客户端执行了 `_apply_reset()` 却什么也没收到 → 结算面板永远停在打开状态**。
+## 这正是「A.5 绑定面缺口」的第二次发生（第一次是 `countdown_updated`）。
+##
+## ## emit 时机：`_apply_reset()` **末尾**，两端都发
+## `net_match_reset()`（客户端）也走 `_apply_reset()`，故房主与客户端**各发一次**，
+## 两端面板都能关。**幂等**：关闭操作本身幂等（`close_ui()` 对已关闭面板是no-op），
+## 房主自己不会收到两次（`net_match_reset` 是 `call_remote` + `if is_authority(): return` 双保险）。
+##
+## ## 为什么不复用 `match_state_changed(IDLE)`
+## ① 语义不对等：复位回IDLE 与开局进IDLE 是两件事，UI 无法区分「开赛前」与「重开中」；
+## ② `match_state_changed` 只在**状态真的变了**时 emit（`_set_state` 内有同值早退），
+##   而 `match_ended → 复位` 这条路径上 ENDED→IDLE 确实会变，语义上虽能凑合，
+##   但会让 UI 必须**记住自己上次看到的状态**才能推断（隐式状态机 = 本项目明令避免）。
+## → 结论：**显式事件**，不靠状态差分推断（与 `countdown_updated` 的取舍同源）。
+signal match_reset
 
 ## ── A.3 字段（默认值必须与契约完全一致，测试断言）──
 ## 当前状态机状态（见 MatchState）
@@ -376,6 +399,12 @@ func _apply_ended(remote_winner_id: int, final_scores: Dictionary) -> void:
 
 
 ## 应用远端复位（`net_match_reset` 核心）：回 IDLE、清比分、复位计时与 winner。
+##
+## ⚠ **末尾必须 emit `match_reset`** —— 这是结算面板能关闭的唯一通知来源。
+##   房主走 `request_reset()` →本方法；客户端走 `net_match_reset()` → 本方法 ⇒ **两端都 emit**。
+##   （曾经只 emit `score_changed`，那是比分板的绑定面 → 客户端面板永远不关，实测缺陷。）
+##   顺序放在 `score_changed` **之后**：先让比分板清空、再关结算面板，
+##   避免面板消失的瞬间比分板还残留上一局的数字（同一帧内的可见顺序）。
 func _apply_reset() -> void:
 	scores.clear()
 	winner_id = WINNER_UNSET
@@ -384,6 +413,7 @@ func _apply_reset() -> void:
 	_sync_accum = 0.0
 	_set_state(MatchState.IDLE)
 	score_changed.emit(scores, time_remaining)
+	match_reset.emit()
 
 
 ## 本端「再来一局」：权威走 `_apply_reset()` + 广播；客户端**不自行复位**，等房主广播。

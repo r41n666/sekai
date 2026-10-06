@@ -185,6 +185,14 @@ func bind(score_manager: Node) -> void:
 	_score_manager = score_manager
 	if not score_manager.match_ended.is_connected(_on_match_ended):
 		score_manager.match_ended.connect(_on_match_ended)
+	# ── 复位信号（EP-3 增补 `ScoreManager.match_reset`）──
+	# ⚠ **这条 connect 是本轮实测缺陷的修复本体**：缺它 → 客户端收到复位后
+	#   结算面板永不关闭（房主靠 `close_ui()` 侥幸关掉，客户端没人通知）。
+	#   守卫用 `has_signal` 是为了让本panel 也能绑到**不含**该信号的旧/假 ScoreManager
+	#   （探针用的替身），此时退化为「只绑 match_ended」，不会运行期报错。
+	if score_manager.has_signal("match_reset") \
+			and not score_manager.match_reset.is_connected(_on_match_reset):
+		score_manager.match_reset.connect(_on_match_reset)
 	if score_manager.has_method("local_peer_id"):
 		_local_peer_id = score_manager.local_peer_id()
 	_refresh_names()
@@ -201,6 +209,32 @@ func _on_match_ended(winner_id: int, final_scores: Dictionary) -> void:
 			float(_score_manager.get("time_remaining")))
 	_refresh_names()
 	open_ui()
+
+
+## 对局已复位（`ScoreManager.match_reset`）→ **关闭面板 + 清陈旧态 + 恢复输入**。
+##
+## ## 为什么必须有这个handler（实测缺陷的形态）
+## 本面板原先**只**监听 `match_ended`，从不监听任何复位信号 ⇒
+##   房主点「再来一局」：`request_reset()` → `_apply_reset()` → 只 emit `score_changed`
+##   （那是**比分板**的绑定面）→ 本面板毫无察觉→
+##   房主的画面靠 `_on_again_pressed` 里的 `close_ui()` 侥幸关掉，
+##   **客户端执行了同样的 `_apply_reset()` 却没人通知 → 结算面板永远卡在屏幕上**。
+## → 修法是**由ScoreManager 广播、UI 消费**（本项目铁律：UI 只绑信号，不碰 RPC、不猜状态）。
+##
+## ## 幂等
+## 复位信号可能重复到达（房主本地 + RPC 各一次、或网络重传）。本方法对已关闭面板是
+##   **纯 no-op**：`close_ui()` 开头就有 `if not visible: return`，
+##   且清态是**赋常量**（非自增/累积），重复执行结果相同。
+func _on_match_reset() -> void:
+	close_ui()
+	# ── 清陈旧态（§「下次结算不得被上一局污染」）──
+	# ⚠ `_has_result` 必须复位为 false：它是 `open_ui()` 的**闸门**
+	#   （`if not _has_result: return`）。若残留 true，则复位后再收到
+	#   一个「未结算」的 `open_ui()` 调用会**展示上一局的陈旧比分表**。
+	_has_result = false
+	_winner_id = ScoreManager.WINNER_UNSET
+	_final_scores = {}
+	_duration_seconds = 0.0
 
 
 ## 每帧同步昵称表（联机昵称可能后到）。由 hud.gd 在已绑定后调用（同 Scoreboard）。
@@ -315,10 +349,17 @@ func _is_authority() -> bool:
 ## `[再来一局]` → 权威端复位对局。
 ##   只调 `ScoreManager.request_reset()`（A.8 既有契约，**不自造RPC**）；
 ##   客户端按钮是 disabled，走到这里也依然会被 `request_reset` 的权威校验挡掉（双保险）。
+##
+## ## 关闭动作为什么走 `_on_match_reset()` 而不是直接 `close_ui()`
+## 正常路径下 `request_reset()` → `_apply_reset()` → `match_reset.emit()`（**同步**）
+## 已经把面板关掉、陈旧态清了；这里再调一次是纯 no-op（幂等）。
+## 真正的价值在**兜底分支**：`ScoreManager` 未绑定（`_score_manager == null`）时
+## 根本没有信号可收，若只留 `close_ui()` 就会「面板关了但 `_has_result` 仍为 true」
+## → 下次 `open_ui()` 可能展示陈旧比分表。统一走 `_on_match_reset()` 保证两条路径口径一致。
 func _on_again_pressed() -> void:
 	if _score_manager != null and _score_manager.has_method("request_reset"):
 		_score_manager.call("request_reset")
-	close_ui()
+	_on_match_reset()
 
 
 ## `[返回大厅]`：联机先退出对局（`leave_game` 内部会切hub 场景），离线直接切场景。
