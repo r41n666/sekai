@@ -12,6 +12,7 @@
 - **目标**：手雷伤害从「只本地结算」改为房主权威，使各端状态一致。
 - **验收标准**（`99_consistency_review §3` C-3）：联机时手雷爆炸后**各端 HP 一致**（不再出现「我端扣血、他端没扣」）。
 - **依赖**：无（与 EP-2 路由改动独立，但都属「伤害同步」主题，建议同批评审）。
+- **⚠ 已知缺口（EP-3 工程反馈，commit `8b0e479`）**：手雷击杀**不计入比分** —— EP-3/ES-3.2 的 `report_kill` 上报只接入了 `weapon.gd` / `knife.gd`，**手雷击杀不走 `report_kill`**。**手雷击杀的 `report_kill` 接入依赖 ES-5.1 的权威结算落地**（权威端判定击杀后才能可靠上报：当前手雷只结算本端本地玩家，无唯一权威判定者，故无法生成可信的 killer/victim 归因）。→ 本 Story 完成后须**同批**补手雷击杀的 `report_kill` 接入。
 - **涉及文件**：`scripts/shooting/grenade_projectile.gd:69`（`_damage_nearby()` 现 `player.has_method("take_damage")` 本地调用）、`scripts/shooting/grenade.gd`。
 - **测试证据**：契约锁——断言爆炸伤害走房主权威路径（`rpc_id(1, ...)` 或房主直接结算 + 广播）。
 

@@ -41,8 +41,12 @@
 - **目标**：LOADING 阶段 3-2-1 倒计时，**冻结输入**，避免「谁先加载完谁先开枪」。
 - **验收标准**（`01_core_loop §5` / `04_ux §4` 规则 3）：倒计时期间 `set_input_blocked(true)`，结束 `LIVE` 才 `false`。
 - **依赖**：EP-3 ES-3.1（`match_state` COUNTDOWN）。
-- **涉及文件**：`scripts/network/network_manager.gd::_start_match()`、`scripts/main.gd`。
-- **测试证据**：契约锁——断言 COUNTDOWN 态调用 `set_input_blocked(true)`。
+- **⚠ 前置：需 EP-3 补状态同步 RPC** —— **依赖 `01_core_loop.md` 附录 A.4 新增的 `sync_match_state`**（房主 → 全端，载荷 `state: int, countdown_remaining: float`）。
+  理由：原 A.4 消息清单无状态迁移消息 → **客户端根本不知道 COUNTDOWN 何时开始** → 无法在倒计时期间冻结输入，也无法显示 3-2-1。
+  当前工程临时近似解见 `01_core_loop.md` A.9.1（客户端收 `sync_scores` 推断 `LIVE`），**不足以支撑本 Story**。
+  → **本 Story 动工前须先确认 `sync_match_state` 契约并实现**（工程实施建议随 ES-4.4 同批，见 `EP-3` 变更记录 `8b0e479`）。
+- **涉及文件**：`scripts/network/network_manager.gd::_start_match()`、`scripts/main.gd`、`scripts/game/score_manager.gd`（新增状态广播，**与 ES-4.4 同批实现**）。
+- **测试证据**：契约锁——断言 COUNTDOWN 态调用 `set_input_blocked(true)`；断言客户端收到 `sync_match_state` 后进入 COUNTDOWN 并冻结输入。
 
 ## ES-4.5 · FFA 显示一致性 + 可访问性第二线索 · M · ⏳ 待实施
 

@@ -268,6 +268,7 @@ IDLE ──(对局加载完成)──▶ COUNTDOWN(3s) ──▶ LIVE ──(胜
 | `sync_scores` | 房主 → 全端 | `authority` / `reliable` | `scores: Dictionary, time_remaining: float` | 变更时 + 每 1 s 心跳 |
 | `match_ended` | 房主 → 全端 | `authority` / `reliable` | `winner_id: int, final_scores: Dictionary` | 触发结算面板 |
 | `match_reset` | 房主 → 全端 | `authority` / `reliable` | — | 「再来一局」复位 |
+| `sync_match_state` ⚠**待设计确认** | 房主 → 全端 | `authority` / `reliable` | `state: int, countdown_remaining: float` | ⚠ **工程实现反馈（ES-3.3/3.4，待 design-strategist 确认）**：用于客户端精确显示 3-2-1 倒计时并在 COUNTDOWN 期间冻结输入（ES-4.4）。**触发时机**：状态迁移时 + COUNTDOWN 期间每 1 s 心跳（与 `sync_scores` 心跳同频）。**必要性**：附录 A.4 原 4 条消息里没有状态迁移消息 → 客户端无法得知 COUNTDOWN 何时开始 → **`04_ux_flow.md §4 规则 3` / `EP-4 ES-4.4` 的「冻结输入 + 加载倒计时」在缺本消息时不可实现**（当前工程实现以「收 `sync_scores` 推断 LIVE」为临时近似解，客户端看不到 3-2-1）。 |
 
 ## A.5 信号（供 HUD 绑定）
 - `score_changed(scores: Dictionary, time_remaining: float)`
@@ -299,6 +300,22 @@ IDLE ──(对局加载完成)──▶ COUNTDOWN(3s) ──▶ LIVE ──(胜
 | 同一帧多人达成 | 房主以「先到达该帧者」为准 |
 | 人机击杀 | **离线计分；联机局不计入**（对齐 `04_ux_flow.md` ⚑F-2 / `01_core_loop.md` ⚑L-5） |
 | 时间到 + 平分 | `deaths` 少者胜；仍平 → `winner_id = -2`（平局） |
+
+### A.9.1 客户端状态推断规则 ⚠**待设计确认（工程实现反馈）**
+> **来源**：EP-3 / ES-3.3~3.4 工程实现（commit `8b0e479`）。**待 design-strategist 确认后定稿。**
+
+A.4 原 4 条消息里没有「状态迁移」消息，客户端无法被精确告知当前 `match_state`。**在 `sync_match_state`（见 A.4 增补行）落地前**，当前工程实现采用以下**临时近似解**：
+
+| 客户端收到 | 推断的 `match_state` | 说明 |
+| --- | --- | --- |
+| 本地初始 | `IDLE` | 场景就绪 |
+| `sync_scores`（且本地仍为 `IDLE`） | `LIVE` | **近似**：收同步 = 对局进行中（无法得知 COUNTDOWN 阶段） |
+| `match_ended` | `ENDED` | 精确 |
+| `match_reset` | `IDLE` | 精确 |
+
+**已知缺陷**：客户端**不会显示 3-2-1 倒计时**，且无法在 COUNTDOWN 期间冻结输入（它不知道 COUNTDOWN 何时开始）。
+**升级路径**：落地 A.4 增补的 `sync_match_state` 后，客户端改为**精确**跟随房主状态（含 `countdown_remaining`），上表近似规则作废。
+→ **这条升级路径是 EP-4 ES-4.4 的前置依赖**（见 `production/epics/EP-4-hud-and-ux.md` ES-4.4）。
 
 ## A.10 与现有脚本的接缝
 | 脚本 | 改动 | 复用 |
