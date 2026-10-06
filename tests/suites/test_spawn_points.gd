@@ -147,3 +147,47 @@ func test_degenerate_inputs_are_safe() -> void:
 	check_eq(_main_script.spawn_index_for(1, [1, 2], 0), 0, "count=0 应返回 0")
 	var fallback: int = _main_script.spawn_index_for(7, [1, 2], 4)
 	check_eq(fallback, 3, "id 不在列表时应按 posmod(7,4)=3 稳定回退")
+
+
+# ---------------------------------------------------------------------------
+# §1.2 顺序依赖不变量（设计侧硬约束 · design-strategist 2026-10-06）
+#
+# `SpawnPoints` 的**子节点次序 = 出生点分配优先序**（R1 用 child index 分配）。
+# 任何人重排/增删 Spawn1~4 都会**静默改变 2/3 人落点**（4 人仍四角、不受影响）。
+# 下列断言把「子节点次序 → 落角映射」钉死，防未来静默回归。
+# 出处：design/gdd/03_map_encounter.md §1.2（第 42~46 行）+ EP-1 ES-1.1。
+# ---------------------------------------------------------------------------
+
+## ① 子节点顺序恒为 (-32,-32) / (32,-32) / (32,32) / (-32,32)
+func test_spawn_child_order_is_canonical() -> void:
+	var expected: Array[Vector2] = [
+		Vector2(-32.0, -32.0),
+		Vector2(32.0, -32.0),
+		Vector2(32.0, 32.0),
+		Vector2(-32.0, 32.0),
+	]
+	check_eq(_spawns.size(), expected.size(), "出生点数量应与规范次序等长")
+	var n := mini(_spawns.size(), expected.size())
+	for i in n:
+		var got := Vector2(_spawns[i].x, _spawns[i].z)
+		check_true(got.is_equal_approx(expected[i]),
+			"Spawn%d 子节点次序应为 %s，实际 %s（次序=分配优先序，改它会影响 2/3 人落点）"
+			% [i + 1, str(expected[i]), str(got)])
+
+
+## ② 2 人落点必共享一条边（相邻角，非对角）——idx 0/1 = (-32,-32)+(32,-32)，共用 z=-32
+func test_two_player_spawns_share_an_edge_not_diagonal() -> void:
+	if _spawns.size() < 2:
+		return
+	var i0: int = _main_script.spawn_index_for(1, [1, 2], _spawns.size())
+	var i1: int = _main_script.spawn_index_for(2, [1, 2], _spawns.size())
+	var a: Vector3 = _spawns[i0]
+	var b: Vector3 = _spawns[i1]
+	# 相邻角：恰有一个坐标轴相等（共享一条边）；对角则两轴都不同。
+	var same_x := is_equal_approx(a.x, b.x)
+	var same_z := is_equal_approx(a.z, b.z)
+	check_true(same_x != same_z,
+		"2 人落点应共享一条边（相邻角），实际 i0=%d i1=%d -> %s / %s" % [i0, i1, str(a), str(b)])
+	var dist := a.distance_to(b)
+	check_true(dist <= 90.0,
+		"2 人落点应为相邻角（≤90m），实际 %.2f m" % dist)
