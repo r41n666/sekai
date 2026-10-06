@@ -133,6 +133,20 @@
    与 `test_two_player_spawns_share_an_edge_not_diagonal` 两条守护用例）；
    任何红线 = 你改动了分配优先序，必须回头核对 §1.2 并同步 `EP-1 ES-1.1`。
    详见 `tests/suites/test_spawn_points.gd`（守护测试）与 `adr/` 中出生点相关记录。
+9. **⚠️ 判定「某个远程对象是否已死/已归零」时，只能用「该对象自己那一端」的值，绝不能用本端缓存的副本。**
+   联机里`apply_network_damage` / `apply_network_state` 都是 `call_remote`：
+   **受害者的血量只在受害者自己的端递减，从不回传射手端** → 射手端 `collider.health` 恒为初始值。
+   本条的由来（C-18，2026-10-06 第二次 G4 实测）：`weapon.gd::_deal_damage()` 曾用
+   `var killed := hp_before - damage <= 0.0` 判死 → 射手端算`100-25<=0` **恒假** →
+   `_report_kill_if_player()` 从不执行 → **比分永远 {kills:0,deaths:0}、15 杀永不 `match_ended`**，
+   而日志里扣血/阵亡全部正常，**极具迷惑性**（看着像"打不到人"）。
+   正确口径：**致死判定归血量真值那一端**（`player.gd::apply_network_damage`），
+   归零时 `net_confirm_kill.rpc_id(射手 peer id)` 回传，射手端再走既有上报路径。
+   自检动作：凡写出`collider.get("health")` / 依赖某个 `xxx_before` 变量做阈值判断，先问
+   「这个值在本端会真的变吗？」—— 不会就是埋雷。
+   守护测试：`tests/suites/test_kill_attribution.gd`。
+   ⚠️ 附带一条通用纪律：**新增 suite 必须手动登记到 `tests/framework/test_runner.gd` 的
+   `SUITE_SCRIPTS` 数组**（该数组不自动发现文件）——漏登记会静默不跑，让人误以为"测试全绿"。
 
 ---
 
