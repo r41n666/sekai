@@ -7,7 +7,7 @@
 
 ---
 
-## ES-4.1 · HUD 比分板 Scoreboard（常驻紧凑条）· S · ⏳ 待实施
+## ES-4.1 · HUD 比分板 Scoreboard（常驻紧凑条）· S · ✅ 已实现
 
 - **目标**：HUD 顶部中央常驻紧凑条 `[目标] 先到 15 杀　剩余 03:24` + 4 个玩家条目，绑 `ScoreManager.score_changed`。
 - **验收标准**（`04_ux §3.1`）：
@@ -15,8 +15,25 @@
   - 临界：某玩家到 14 杀 → 该条目闪烁 + 「还差 1 杀」；剩余 ≤30 s → 计时器变亮 + 「终局冲刺」；
   - 数字字号 ≥ 16、用**明度对比**而非仅颜色（`§6` Standard）。
 - **依赖**：EP-3 ES-3.4（`score_changed` 信号）。
-- **涉及文件**：`scripts/ui/hud.gd`（新增 `Scoreboard` 子节点）、`scenes/ui/hud.tscn`。
-- **测试证据**：契约锁——断言 `hud.gd` 连接了 `score_changed`；视觉回归留 `tools/capture_acceptance.gd`。
+- **涉及文件**：`scripts/ui/scoreboard.gd`（新增）+ `scenes/ui/scoreboard.tscn`（新增）、
+  `scripts/ui/hud.gd`（`$Scoreboard` 接线 + `_unhandled_input` 处理 Tab）、
+  `scenes/ui/hud.tscn`（实例化 `Scoreboard`）、`project.godot`（新增 `scoreboard` 输入动作 = Tab / `4194306`）。
+- **实现要点**（与 `ScoreManager` 同一取舍）：
+  - **纯逻辑 / 渲染分离**：`build_rows` / `display_name_for` / `format_clock` / `kd_text` /
+    `is_near_target` / `compact_row_text` / `full_row_text` 全为**静态纯函数**，headless 可直接断言；
+    节点树只负责把输出贴到 Label。→ 排序口径、KD 零分母、倒计时格式都能被单测钉死。
+  - **排序与胜负同口径**：击杀降序 → 死亡升序 → peer_id 升序。末位`peer_id` 是为了
+    **各端排出完全相同的顺序**（否则榜会在两端抖动）。
+  - **领先者标记取「击杀数并列最高」的全部行**，而非只标排序后第 0 行；
+    且**开局 0:0 时无人领先**（全高亮等于没高亮）。
+  - **不自行判定胜负**：胜负唯一口径是 `ScoreManager._evaluate_winner()`，
+    本文件只读 `scores`（配`test_does_not_reimplement_winner_evaluation` 纪律锁）。
+  - **Tab 完整榜为非模态覆盖层**：不进 `game_ui` 组，可边看边打；
+    但被其它 `game_ui` 界面（死亡界面 / 结算面板）打开时屏蔽（`_blocked_by_other_ui`）。
+- **测试证据**：`test_scoreboard.gd` **20 用例** —— 排序口径 / 跨端顺序稳定 / 并列领先 /
+  0:0 无领先 / KD 零分母 / 倒计时格式与负数夹取 / 临界边界 / 标记与文案非空 /
+  接线契约锁 / 输入动作注册 / 场景节点路径 / 字号下限 / 禁止自行判定胜负。
+  窗口实测（Vulkan，300 帧）确认：`▶ 玩家1  0`、`1　玩家1　0　0　—`、Tab 切换正常、0 脚本错误。
 
 ## ES-4.2 · 结算面板 `match_result`（终态）· M · ⏳ 待实施
 

@@ -166,6 +166,30 @@
     - 换驱动后必须重跑一次窗口双端G4（headless 自检 `--headless` 不走渲染后端，
       **因此 verify PASS 并不能证明渲染没问题** —— 这是本条能潜伏至今的原因）。
 
+11. **配置文件的「清理」必须先diff**：`project.godot` 会被 Godot 自动写入
+    （如 `[debug] file_logging/*`），看着像污染就用 `git checkout -- project.godot` 还原 ——
+    ⚠ **这条命令按文件整体还原，会把同一文件里已修复的配置一并回退**。
+    本项目已踩过：commit `a3efe27` 为清理调试日志执行该命令，
+    把第 10 条刚修好的 `rendering_device/driver.windows="vulkan"` 整块删掉，
+    且因 `verify.sh` 走 headless 而**无人发现**。
+    - 纪律：**清理前先 `git diff project.godot` 逐行确认**，只该留下污染行；
+      若diff 里混有本轮修好的内容，改用 `Edit` 精确删除单行。
+    - 已加锁：`tests/suites/test_render_driver.gd` 直接读 `project.godot` 断言
+      `driver.windows="vulkan"` 在位且带「勿改回」注释 —— 该行被删即测试转红。
+
+12. **UI 文案函数：格式串占位符数必须等于参数数**：
+    GDScript 的 `"%s%s%d" % [a, b, c, d]` 在**运行期**报 "too many arguments"
+    并返回**空串**（编译期无任何提示）。UI 上表现为「整条 Label 空白」，
+    极难从日志定位。
+    - 纪律：新增/修改任何 `return "..." % [...]` 时，先数一遍占位符；
+      涉及多段可选前缀（如 `"▶ " if cond else ""`）时**尤其**容易漏。
+    - 已加锁：`test_scoreboard.gd::test_compact_row_text_contains_name_and_kills`
+      断言输出**含名字与击杀数**，而不是只断言标记存在 —— 只断言 `begins_with("▶ ")`
+      这种会在空串上失败，但换种写法就可能变成弱断言。
+    - 同类纪律：`test_*` 里写 `check_eq(s, "—")` 这类**精确文案断言**前，
+      先确认被测函数的真实契约（本项目 `kd_text(15, 0) == "15.0"` 而非 `"—"`），
+      不要按直觉写期望值 —— 测试写错和实现写错一样会拖慢收口。
+
 ---
 
 ## 5. HUD 提示条与真实按键的一致性
@@ -185,3 +209,4 @@
 | 2026-10-06 | 初版：21 个输入动作 + 3 界面互斥 + 屏蔽矩阵 | 程基岩（E3-01） |
 | 2026-10-06 | §4 增第 7 条：改组归属前先 grep 全部 `is_in_group` 消费点（配 ADR-007） | 程基岩（E4-01 补录） |
 | 2026-10-06 | §4 增第 8 条：改 `SpawnPoints` 子节点次序前核对 §1.2（次序=分配优先序，配 `test_spawn_points.gd` 守护测试） | 程基岩（R1/R2 收口） |
+| 2026-10-06 | §4 增第 11 条：配置文件清理前必须先 diff（`git checkout -- project.godot` 曾把 C-19 的 Vulkan 修复整块回退，且 headless 自检无法发现）；增第 12 条：UI 文案格式串占位符数须等于参数数（GDScript 运行期静默返回空串） | 程基岩（EP-4 ES-4.1 收口） |

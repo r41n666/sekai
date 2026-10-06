@@ -39,6 +39,11 @@ ui_cancel={
 "events": Array[InputEvent]([Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":16,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194305,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
 ])
 }
+scoreboard={
+"deadzone": 0.2,
+"events": Array[InputEvent]([Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":16,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194306,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+])
+}
 move_forward={
 "deadzone": 0.2,
 "events": Array[InputEvent]([Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":16,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":87,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
@@ -146,5 +151,19 @@ view_toggle={
 
 [rendering]
 
+; ⚠ 固定 Vulkan，**不要**改回 d3d12（2026-10-06 实测，见 docs/architecture/control_checklist.md §4-10）。
+;   D3D12 后端在本机 AMD RX 6750 GRE 上初始化纹理必失败：
+;     ERROR: CreateResource failed with error 0x80070057.        （= E_INVALIDARG）
+;     at: texture_create (drivers/d3d12/rendering_device_driver_d3d12.cpp:1404)
+;     → "!texture.driver_id" → "uninitialized RID" → "tex is null"（texture_set_size_override）
+;   随后渲染器拿空 RID 继续走 → 进程崩掉（编辑器里表现为 "Debugging process stopped"）。
+;   这是 Godot D3D12 后端缺陷，非本项目代码问题（同款错误级联见 godot#117115，
+;   报告者同为 AMD 显卡，明确「仅 D3D12 复现、Vulkan 正常」）。
+;   本机实测对照：D3D12 = 9 条错误；Vulkan = 0 条、exit 0。
+;   ⚠⚠ 这段曾经被误删过一次：commit a3efe27 用 `git checkout -- project.godot`
+;      清理 Godot 自动写入的调试日志时，把本段一并回退，导致 C-19 修复丢失。
+;      ⇒ 清理 project.godot 前**必须**先 `git diff project.godot` 确认只含污染行。
+;      tests/suites/test_render_driver.gd 已加锁，本行被删即测试转红。
+rendering_device/driver.windows="vulkan"
 textures/default_filters/anisotropic_filtering_level=3
 anti_aliasing/quality/use_taa=true

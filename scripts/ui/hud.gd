@@ -12,6 +12,9 @@ class_name GameHUD
 ##   KillFeed       击杀日志
 ##
 ## 数据来源（通过场景组解耦查找）：player / weapon / recoil / camera
+##   —— EP-4 起新增一条：**ScoreManager**（比分板 / 结算面板的唯一数据源，附录 A.5）
+##   ⚠ ScoreManager 在 `main.tscn` 下与 HUD 平级，按节点名取（不用组查找：
+##   ScoreManager 不该被别的东西按「组」语义误用）。
 
 ## 击杀日志保留时间（秒）
 @export var kill_feed_duration := 4.5
@@ -29,11 +32,14 @@ class_name GameHUD
 @onready var _reload_bar: ProgressBar = $AmmoPanel/ReloadBar
 @onready var _kill_feed: VBoxContainer = $KillFeed
 @onready var _leave_button: Button = $LeaveButton
+@onready var _scoreboard: Scoreboard = $Scoreboard
 
 var _player: Node
 var _weapon: Node
 var _recoil: Node
 var _bound := false
+## ScoreManager 是否已接上比分板（_ready 时序不确定，取不到就每帧重试）
+var _scoreboard_bound := false
 
 
 func _ready() -> void:
@@ -42,6 +48,31 @@ func _ready() -> void:
 	_reload_bar.visible = false
 	_leave_button.pressed.connect(_on_leave_pressed)
 	_bind()
+	# EP-4 ES-4.1：比分板绑ScoreManager.score_changed（附录 A.5）——
+	#   UI 只绑信号、不碰 RPC / 不自行判定胜负（胜负口径唯一归 ScoreManager._evaluate_winner）。
+	#   ⚠ 时序：HUD 的 _ready 可能早于/晚于 ScoreManager，故用节点名兜底取一次并允许延迟重试。
+	_bind_scoreboard()
+
+
+## EP-4 ES-4.1：把 ScoreManager 接到比分板（取不到时下一帧再试，避免 _ready 顺序问题）。
+func _bind_scoreboard() -> void:
+	var scene := get_tree().current_scene
+	if scene == null:
+		return
+	var score := scene.get_node_or_null("ScoreManager")
+	if score == null:
+		return
+	_scoreboard.set_local_peer_id(score.local_peer_id())
+	_scoreboard.bind(score)
+	_scoreboard_bound = true
+
+
+## 按住 Tab 显示完整榜、松开隐藏（§3.1.1 · 非模态，可边看边打）。
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("scoreboard"):
+		_scoreboard.show_full()
+	elif event.is_action_released("scoreboard"):
+		_scoreboard.hide_full()
 
 
 ## 返回大厅：联机时退出对局；单机时直接回大厅
@@ -55,6 +86,10 @@ func _on_leave_pressed() -> void:
 func _process(_delta: float) -> void:
 	if not _bound:
 		_bind()
+	if not _scoreboard_bound:
+		_bind_scoreboard() # 延迟兜底：ScoreManager 可能晚于 HUD 就绪
+	elif _scoreboard != null:
+		_scoreboard.refresh_names()
 	if _weapon == null or _recoil == null:
 		return
 
