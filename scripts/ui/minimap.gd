@@ -4,7 +4,8 @@ class_name Minimap
 ##
 ## - 以玩家为中心，默认随视角旋转（`rotate_with_player = false` 则固定北向上）
 ## - 障碍物来自组 `minimap_obstacle`（取其中 BoxShape3D 碰撞体的位置与尺寸）
-## - 敌人来自组 `enemy`（红色），队友来自组 `friendly`（绿色）
+## - 敌人来自组 `enemy`（红色）；队友来自组 `friendly`（绿色，仅 TDM 生效——FFA 下该组为空）
+## - 注意：远程玩家在 FFA 下归 `enemy` 组（scripts/player.gd::_setup_remote_player），按敌对渲染
 ## - 边缘画北向 N 标记
 ##
 ## TODO(阶段2+)：地形贴图（TextureRect / SubViewport）、缩放档位、敌人只在小地图显示已暴露目标。

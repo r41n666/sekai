@@ -13,7 +13,7 @@ extends TestSuite
 ## ⚠ 本 suite 目前 pending：EP-2（production/epics/EP-2-ffa-faction-decoupling.md）尚未实施。
 ##    EP-2 落地后，把 EP2_IMPLEMENTED 置为 true，下面 4 个用例立即生效，成为该解耦的回归基线。
 
-const EP2_IMPLEMENTED := false
+const EP2_IMPLEMENTED := true
 
 const WEAPON_SRC := "res://scripts/shooting/weapon.gd"
 const KNIFE_SRC := "res://scripts/shooting/knife.gd"

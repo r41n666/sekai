@@ -350,8 +350,10 @@ func _deal_damage(collider) -> bool:
 	var killed: bool = hp_before != null and float(hp_before) - damage <= 0.0
 	if NetworkManager.is_online and collider is Node and not collider.is_in_group("bot"):
 		# 人机（bot 组）只在各端本地存在，伤害也只在本地结算，不走联机 RPC
-		if collider.is_in_group("friendly"):
-			# 其他玩家：只让被击中的那一端扣血（他的 HUD 与镜头震动由本端响应）
+		if collider.has_method("apply_network_damage"):
+			# 远程玩家：用「能力探测」识别玩家身份（ADR-007）——apply_network_damage 是
+			# PlayerController 显式声明的玩家契约方法，与显示阵营组 friendly 彻底解耦。
+			# 只让被击中的那一端扣血（他的 HUD 与镜头震动由本端响应）
 			collider.apply_network_damage.rpc_id(
 				collider.get_multiplayer_authority(), damage, NetworkManager.get_my_name()
 			)

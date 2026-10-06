@@ -97,7 +97,9 @@ func _slash() -> void:
 		return
 	var killed: bool = hp_before != null and float(hp_before) - damage <= 0.0
 	if NetworkManager.is_online and collider is Node:
-		if collider.is_in_group("friendly"):
+		# 与 weapon.gd::_deal_damage() 保持同一路由判据（ADR-007）：玩家身份靠能力探测，
+		# 不依赖任何显示语义组，避免近战与枪械行为分叉。
+		if collider.has_method("apply_network_damage"):
 			collider.apply_network_damage.rpc_id(
 				collider.get_multiplayer_authority(), damage, NetworkManager.get_my_name()
 			)

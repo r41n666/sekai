@@ -133,9 +133,10 @@ func _setup_local_player() -> void:
 	health_changed.emit(health, max_health)
 
 
-## 远端玩家：当作「队友」显示（屏幕图标 / 小地图绿点），换个颜色方便区分
+## 远端玩家：FFA 个人死斗下即「敌对目标」，按敌对渲染（小地图红点 / 无队友图标）。
+## 组归属只影响显示（enemy），伤害路由靠能力探测 apply_network_damage（ADR-007），两者正交。
 func _setup_remote_player() -> void:
-	add_to_group("friendly")
+	add_to_group("enemy")
 	_camera.current = false
 	# 远端玩家固定显示主武器（不参与槽位切换）
 	var rifle: Node = _weapons.get("Rifle")
@@ -339,6 +340,10 @@ func is_aiming() -> bool:
 
 
 ## 联机：被其他玩家的子弹命中（由射击者 RPC 发到本端，只有自己端会真正扣血）
+##
+## ⚠ 本方法是「玩家身份契约」（ADR-007）：`weapon.gd` / `knife.gd` 的伤害路由靠
+##    `collider.has_method("apply_network_damage")` 判定「这是远程玩家」。请勿给
+##    任何非玩家节点（bot / 场景物件 / UI）添加同名方法，否则会被误判为玩家、走错路由。
 @rpc("any_peer", "call_remote", "reliable")
 func apply_network_damage(amount: float, _shooter: String) -> void:
 	take_damage(amount)

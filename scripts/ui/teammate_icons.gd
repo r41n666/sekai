@@ -13,6 +13,9 @@ class_name TeammateIcons
 @export var ally_color := Color(0.4, 0.95, 0.6, 0.95)
 @export var distance_color := Color(0.75, 0.95, 0.85, 0.8)
 
+## 队友图标消费的阵营组（FFA 下为空 → 不绘制任何图标）
+@export var ally_group := "friendly"
+
 var _camera: Camera3D
 
 
@@ -38,6 +41,11 @@ func _draw() -> void:
 	var projection := _camera.get_camera_projection()
 	if is_zero_approx(projection.z.z) or is_zero_approx(projection.y.y):
 		return
+	# FFA（个人死斗）下没有队友：ally_group 为空时显式早退，让「无队友图标」成为
+	# 明确意图而非「空循环恰好不画」的副作用（04_ux §6.2 / ADR-007）。
+	var allies := get_tree().get_nodes_in_group(ally_group)
+	if allies.is_empty():
+		return
 	var font := ThemeDB.fallback_font
 	var center := size * 0.5
 	var half_extent := Vector2(
@@ -45,7 +53,7 @@ func _draw() -> void:
 		maxf(center.y - edge_margin, 1.0)
 	)
 
-	for node in get_tree().get_nodes_in_group("friendly"):
+	for node in allies:
 		if not (node is Node3D):
 			continue
 		var world := (node as Node3D).global_position + Vector3.UP * height_offset

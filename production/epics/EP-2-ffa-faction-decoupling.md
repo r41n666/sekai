@@ -8,7 +8,7 @@
 
 ---
 
-## ES-2.1 · 伤害路由改「能力探测」· S · ⏳ 待实施
+## ES-2.1 · 伤害路由改「能力探测」· S · ✅ 已完成
 
 - **目标**：`weapon.gd::_deal_damage()` / `knife.gd::_slash()` 的 `is_in_group("friendly")` 判据替换为
   `collider.has_method("apply_network_damage")`（受害者端权威路由保持不变）。
@@ -18,7 +18,7 @@
 - **涉及文件**：`scripts/shooting/weapon.gd:351-362`、`scripts/shooting/knife.gd:99-109`。
 - **测试证据**：`tests/suites/test_damage_routing.gd::test_weapon_routing_uses_capability_probe` / `::test_knife_routing_uses_capability_probe`。
 
-## ES-2.2 · 远程玩家组归属（FFA：`friendly` → `enemy`）· S · ⏳ 待实施
+## ES-2.2 · 远程玩家组归属（FFA：`friendly` → `enemy`）· S · ✅ 已完成
 
 - **目标**：FFA 下 `_setup_remote_player()` 把远程玩家加入 `enemy` 组（`friendly` 组留空）；TDM 未来再恢复。
 - **验收标准**（`04_ux §6.2` / AC-F1）：FFA 对局中 `friendly` 组为空；远程玩家出现在 `enemy` 渲染集合。
@@ -26,7 +26,7 @@
 - **涉及文件**：`scripts/player.gd:138`（`_setup_remote_player` 的 `add_to_group(...)`）。
 - **测试证据**：`tests/suites/test_damage_routing.gd::test_remote_player_joins_enemy_group_in_ffa`。
 
-## ES-2.3 · 显示侧：FFA 敌对渲染 + 队友图标停用 · S · ⏳ 待实施
+## ES-2.3 · 显示侧：FFA 敌对渲染 + 队友图标停用 · S · ✅ 已完成
 
 - **目标**：`minimap.gd` 远程玩家按 `enemy` 形状/明度渲染（M1 方点 / M2 明度）；`teammate_icons.gd` 在无 `friendly` 成员时自然不绘制（或显式早退）。
 - **验收标准**（`04_ux §6.1/§6.2`）：FFA 下 `teammate_icons` 不绘制任何图标；小地图敌对标记为**方形**。
@@ -34,7 +34,7 @@
 - **涉及文件**：`scripts/ui/minimap.gd:92`（`_draw_group(ally_group,...)`）、`scripts/ui/teammate_icons.gd:48`（`get_nodes_in_group("friendly")`）。
 - **测试证据**：截图型断言（`AC-F3`），暂列视觉回归；headless 下断言 `friendly` 组为空。
 
-## ES-2.4 · 启用 `test_damage_routing` 回归 · S · ⏳ 待实施
+## ES-2.4 · 启用 `test_damage_routing` 回归 · S · ✅ 已完成
 
 - **目标**：EP-2 落地后把 `tests/suites/test_damage_routing.gd` 的 `EP2_IMPLEMENTED` 置 `true`，使该 suite 从 pending 转为**启用**。
 - **验收标准**：runner 输出中该 suite 由 `○ PENDING` 变为 `✓`；退出码仍为 0。
@@ -56,3 +56,17 @@ ES-2.1 ◀── 必须与 ES-2.2 同批提交（ADR-007：不能只改一半）
 
 - **只改一半**（如把 `player.gd` 改到 `enemy` 却留 `weapon.gd` 读 `friendly`）→ 玩家伤害落到广播分支 → **联机伤害损坏**。AC-F2 就是为此立的回归线。
 - 能力探测的**边界**：若未来给非玩家节点也加 `apply_network_damage` 会被误判——低风险，用注释标注该方法为「玩家身份契约」（ADR-007）。
+
+---
+
+## 变更记录
+
+- **2026-10-06**｜程基岩｜EP-2 落地（ES-2.1 ~ ES-2.4 全部完成），四文件同改 + 回归启用：
+  - `scripts/shooting/weapon.gd:353`：`if collider.is_in_group("friendly")` → `if collider.has_method("apply_network_damage")`。
+  - `scripts/shooting/knife.gd:100`：同上，保持枪/刀同一路由判据。
+  - `scripts/player.gd:138`（`_setup_remote_player`）：`add_to_group("friendly")` → `add_to_group("enemy")`；同步改写上方注释（FFA = 敌对渲染）。
+  - `scripts/player.gd`（`apply_network_damage`）：加「玩家身份契约」注释，警示勿给非玩家节点加同名方法。
+  - `scripts/ui/minimap.gd`：**确认免改**（`enemy_group` 默认即 `"enemy"`，`:93` 已有 `_draw_group(enemy_group, ...)`）；仅更新头部注释澄清 FFA 语义。
+  - `scripts/ui/teammate_icons.gd`：新增 `ally_group` 导出并**显式早退**（`allies.is_empty()` → return），使「FFA 无队友图标」成为明确意图。
+  - `tests/suites/test_damage_routing.gd:16`：`EP2_IMPLEMENTED` `false` → `true`，suite 启用。
+  - 验证：全量回归 **31 用例 / 89 断言 / 0 失败 / exit 0**；负向验证（判据改回 `friendly`）确认 `test_weapon_routing_uses_capability_probe` **确实失败**（exit 1 / 2 断言失败），证明测试非空跑。
