@@ -10,3 +10,6 @@
 
 # tools/mutation_es42.py 的变异体备份目录（源码原件备份，用于还原注入）
 /.tmpdbg/
+
+# tools/mutation_combat_anim.py 的字节备份目录（跨运行稳定，用于启动自愈还原）
+/.mutation_backup/

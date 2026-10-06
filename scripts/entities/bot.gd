@@ -199,6 +199,23 @@ func _die() -> void:
 	_muzzle_flash.visible = false
 	_muzzle_light.visible = false
 	# 倒地：向前扑倒 + 停一会儿再移除
+	#
+	# ⚠ 已知重叠（**有意保留，不是 bug**）：下面这个 tween 把模型节点的
+	#   `rotation:x` 转到 -PI*0.5（整体向前扑倒），而新加的**程序化死亡叠加层**
+	#   （MikuCombatAnim 的 Action.DEATH + MikuProceduralPose 的骨骼塌陷）**也在
+	#   表现倒地**。两者叠加 = 「节点整体前扑 + 骨骼额外塌陷」。
+	#   之所以保留，是因为它们作用在不同层级、不同时间尺度：
+	#     · tween 管**节点姿态**与**倒地后的停留/回收时序**（1.2s 后 queue_free，
+	#       这部分程序化层完全不管）；节点级旋转在任何骨骼数据缺失时都生效，
+	#       表现更稳，不会出现「模型没倒下去」。
+	#     · 程序化层管**骨骼细节**（躯干前倾/下肢塌陷的曲线），更可控、可调参。
+	#   两种取舍（留待视觉定稿时二选一，勿当成 bug 顺手删）：
+	#     A. 留 tween（**当前**）：节点扑倒更稳、时序自洽，代价是骨骼塌陷被叠进
+	#        已前扑的姿态里，整体幅度略大。
+	#     B. 纯骨骼（删 tween 的 rotation，仅保留 interval + queue_free）：倒地
+	#        表现完全由程序化层控制、可精确调参，代价是无有效骨骼/姿态失效时
+	#        人机会「站着消失」。
+	#   改动前请同步核对 tests/suites/test_combat_anim.gd 的相关断言。
 	var tween := create_tween()
 	tween.tween_property(_model, "rotation:x", -PI * 0.5, 0.3)
 	tween.tween_interval(1.2)

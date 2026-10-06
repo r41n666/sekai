@@ -5,6 +5,11 @@
 # 用途：把「导入 → 脚本可解析性校验 → 测试」固化成一条可重复命令，
 #       供每次改动后自检。任一必需环节失败 → 非零退出。
 #
+# ⚠ 一句话纪律：**在本项目不要用 `--import`，用纯 `--headless`。**
+#   `--import` 会走编辑器代码路径并重写 project.godot、删掉 Vulkan 锁（§4-17）。
+#   本脚本已把它降级为「仅首次（类缓存不存在时）执行」+「执行后强制断言锁还在」。
+#   详见文件头「为什么 --import 必须条件执行」。
+
 # 用法：
 #   bash tools/verify.sh            # 静默模式：只打印每环节结论 + 最终退出码
 #   bash tools/verify.sh -v         # 详细模式：追加 --import / 测试的完整原始输出
@@ -16,7 +21,7 @@
 #
 # 退出码：
 #   0   全部环节通过
-#   1   有环节失败（--import 失败 / 测试失败 / 步骤超时）
+#   1   有环节失败（--import 失败 / 测试失败 / 步骤超时 / import 破坏 Vulkan 锁）
 #   2   前置条件不满足（找不到 Godot 可执行文件 / 参数错误）
 #
 # ---------------------------------------------------------------------------
@@ -45,6 +50,36 @@
 # 另有一个关键运行事实：**runner 在遇到解析错误时不会走到 quit()，会挂起**
 # （实测 exit 124）。所以本脚本对 runner 强制加 timeout，并把「超时」判为失败，
 # 同时尝试从输出里抓出 `Parse error` 作为失败原因。详见下方 run_runner()。
+# ---------------------------------------------------------------------------
+#
+# ---------------------------------------------------------------------------
+# ⚠⚠⚠ 为什么 `--import` 必须「条件执行」（control_checklist §4-17 第 5 次复发的机制）
+# ---------------------------------------------------------------------------
+# 2026-10-06 实测事故：**跑一次本脚本就会删掉 project.godot 的 Vulkan 锁。**
+#
+#   机制：`--import` 走的是 Godot 的**编辑器代码路径**（输出里可见
+#         `loading_editor_layout` / 「正在加载中央编辑器布局」），而编辑器在加载
+#         布局时会**重写 project.godot**，把
+#             rendering_device/driver.windows="vulkan"
+#         这一整块删掉（Godot 4.7 对「当前非默认渲染后端」的容错写法）。
+#
+#   为什么这条链特别恶心：删锁的**不是**那次运行，而是**下一次**。
+#         verify.sh 跑完 → 锁没了 → verify.sh 自己这轮全绿（它没检查）
+#         → 下一轮测试因 D3D12 崩溃而转红 → 失败现象指向「测试坏了」
+#         → 真因（「脚本破坏了配置」）被完全掩盖。
+#         这正是 C-19 复发 5 次、前 4 次都查不到根因的机制。
+#
+#   判据（结论，写进纪律）：
+#         **在这个项目里不要用 `--import`，用纯 `--headless`。**
+#         class_name 注册在**首次**导入后就已写入
+#         `.godot/global_script_class_cache.cfg`，后续纯 `--headless` 运行即可。
+#
+#   因此本脚本的两条硬规则：
+#     ① `--import` **只在类缓存不存在时**才跑（缓存已存在 → 打印 SKIP 直接跳过）。
+#     ② 万一还是跑了，`--import` 之后**立刻**断言 Vulkan 锁还在；不在就
+#        **自动还原 + 非零退出**，绝不允许流程「继续往下跑测试然后莫名转红」。
+#   还原一律用 `git show HEAD:project.godot > project.godot`（写字节），
+#   **禁止** `git checkout --` / `git restore`（§4-11 实测会「退出码 0 但文件没还原」）。
 # ---------------------------------------------------------------------------
 
 set -u
@@ -121,28 +156,79 @@ dump() {
 }
 
 # --- 4. 步骤 1：--import（建资源 / 类缓存）----------------------------------
+# ⚠ 条件执行 + 后置断言，理由见文件头「为什么 --import 必须条件执行」。
 IMPORT_LOG=""
 RUNNER_LOG=""
+CLASS_CACHE="$PROJECT_ROOT/.godot/global_script_class_cache.cfg"
+
+# 用 git show HEAD:<path> 读字节并写回（禁用 git checkout --/git restore：§4-11 假成功）
+restore_project_godot() {
+	if git show HEAD:project.godot > "$PROJECT_ROOT/project.godot" 2>/dev/null \
+	   && grep -q 'rendering_device/driver.windows="vulkan"' "$PROJECT_ROOT/project.godot"; then
+		printf '      已自动还原 project.godot（git show HEAD:project.godot），Vulkan 锁已恢复 o\n'
+		return 0
+	fi
+	printf '      x 自动还原失败！请手工执行：git show HEAD:project.godot > project.godot\n'
+	return 1
+}
+
+# Vulkan 锁守门：无论 --import 跑没跑，都必须断言锁还在。
+# ⚠ 为什么不放在「--import 之后」这一处：实测发现**锁可能在本脚本跑之前就已经没了**
+#   （上一次误用 --import、或用 Godot 编辑器打开过项目）。若断言只在 import 之后做，
+#   类缓存已存在时的 SKIP 路径就会**完全绕过检查** → 在坏配置上跑测试 → 转红 →
+#   失败现象指向「测试坏了」，真因（配置被破坏）再次被掩盖（§4-17 前 4 次的机制）。
+#   所以这里做成**无条件前置断言**：进门先验锁，坏在源头就不往下走。
+assert_vulkan_lock() {
+	if grep -q 'rendering_device/driver.windows="vulkan"' "$PROJECT_ROOT/project.godot"; then
+		return 0
+	fi
+	printf 'FAIL  %s\n' "Vulkan 锁缺失（control_checklist §4-17 第 5 次复发）。还原命令：git show HEAD:project.godot > project.godot"
+	if [ "${1:-}" = "import" ]; then
+		printf '      %s\n' "⚠ 就在刚才的 --import 之后检测到：--import 走编辑器代码路径（loading_editor_layout）会重写 project.godot 并删掉该行。"
+	fi
+	restore_project_godot || true
+	echo "  已中止：绝不在被破坏的配置上继续跑测试（否则失败现象会指向「测试坏了」，掩盖真因）。"
+	IMPORT_VULKAN_BROKEN=1
+	return 1
+}
 
 run_import() {
 	local log="$LOG_DIR/import.log"
+
+	# ① 条件执行：类缓存已存在 → 跳过 --import（--import 会污染 project.godot）
+	if [ -f "$CLASS_CACHE" ]; then
+		# 即便跳过 import，也**必须**验锁（锁可能是上一次误用 --import 时已被删）
+		if ! assert_vulkan_lock ""; then return 1; fi
+		printf 'SKIP  %s\n' "import（类缓存已存在）"
+		printf '      %s\n' "$CLASS_CACHE"
+		return 0
+	fi
+
+	printf 'INFO  %s\n' "类缓存不存在，执行首次 --import（此后本步骤将一直 SKIP）"
 	timeout "$TIMEOUT_SECS" "$GODOT" --headless --path "$PROJECT_ROOT" --import >"$log" 2>&1
 	local rc=$?
 	dump "$log"
-	if [ "$rc" -eq 0 ]; then
-		printf 'PASS  %s\n' "import（资源/类缓存就绪）"
+	if [ "$rc" -ne 0 ]; then
+		if [ "$rc" -eq 124 ]; then
+			printf 'FAIL  %s\n' "import（步骤超时 ${TIMEOUT_SECS}s）"
+		else
+			printf 'FAIL  %s\n' "import（退出码 $rc；GLB/贴图等资源导入失败）"
+		fi
+		grep -iE "error|failed|could not" "$log" | head -5 | sed 's/^/      /'
+		echo "  详见：$log（保留供排查）"
+		IMPORT_LOG="$log"
+		return 1
+	fi
+
+	# ② 后置断言：--import 之后 Vulkan 锁必须还在（§4-17 第 5 次复发的守门）
+	if ! assert_vulkan_lock "import"; then
 		rm -f "$log"
-		return 0
+		return 1
 	fi
-	if [ "$rc" -eq 124 ]; then
-		printf 'FAIL  %s\n' "import（步骤超时 ${TIMEOUT_SECS}s）"
-	else
-		printf 'FAIL  %s\n' "import（退出码 $rc；GLB/贴图等资源导入失败）"
-	fi
-	grep -iE "error|failed|could not" "$log" | head -5 | sed 's/^/      /'
-	echo "  详见：$log（保留供排查）"
-	IMPORT_LOG="$log"
-	return 1
+
+	printf 'PASS  %s\n' "import（资源/类缓存就绪，Vulkan 锁完好）"
+	rm -f "$log"
+	return 0
 }
 
 # --- 5. 步骤 2：脚本可解析性 + 行为门禁（test_runner.tscn）------------------
@@ -198,8 +284,18 @@ echo "sekai verify ｜ Godot: $GODOT"
 echo "-----------------------------------------------------"
 
 FAILED=0
+IMPORT_VULKAN_BROKEN=0
 
-if ! run_import; then FAILED=1; fi
+if ! run_import; then
+	FAILED=1
+	# Vulkan 锁被破坏时**立刻中止**：在坏配置上跑测试得到的红结论全是噪声
+	# （真因是「脚本破坏了配置」，现象却指向「测试坏了」）。这正是 §4-17 查不到根因的机制。
+	if [ "$IMPORT_VULKAN_BROKEN" -eq 1 ]; then
+		echo "-----------------------------------------------------"
+		echo "VERIFY FAIL（退出码 1）｜ import 污染 project.godot，已中止（未跑测试）"
+		exit 1
+	fi
+fi
 
 # import 失败时仍尝试跑 runner（可能给更多线索），但整体已判失败
 if ! run_runner; then FAILED=1; fi
