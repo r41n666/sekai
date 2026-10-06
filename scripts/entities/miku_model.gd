@@ -18,6 +18,31 @@ class_name MikuModel
 ## 判定方法：scripts/entities/model_facing_check.gd（或 tools 里同款离屏实拍：相机放 +Z 正前方，看到脸才对）。
 const MODEL_YAW_CORRECTION := {
 	"miku_statue": 180.0, # Sketchfab 雕塑：正面朝 -Z，实测 +Z 机位看到的是后脑（双马尾在后），补 180
+	"miku_classic": 180.0, # Sketchfab 导出：正面朝 -Z（+Z 机位看到后脑 / 双马尾在前），实测确认，补 180
+}
+
+## 逐模型「待机微动作」参数表（键 = 模型目录名；查不到用 DEFAULT_IDLE_PROFILE）。
+## 由 MikuIdleMotion（程序化呼吸 / 重心微移 / 上身摆动）驱动，作用在「载入模型」这一层，
+## 和 MikuModel 上的站/蹲/趴姿态（player.gd）互不干扰。
+## 参数含义见 miku_idle_motion.gd 顶部注释；幅度单位：米 / 弧度 / 缩放比例。
+## - miku_statue 是「雕像」型资源（无骨骼无动画），专门给它一套更明显的呼吸 + 重心摆动；
+## - 其余模型保持默认（轻微），避免抢掉它们自带动画剪辑的表现。
+const DEFAULT_IDLE_PROFILE := {
+	"breath_amp": 0.010, "breath_scale_amp": 0.005,
+	"sway_x_amp": 0.012, "sway_z_amp": 0.008,
+	"yaw_amp": 0.022, "roll_amp": 0.008, "pitch_amp": 0.006,
+	"breath_freq": 0.24, "sway_freq": 0.14, "sway_roll_freq": 0.18,
+	"harmonic": 0.25,
+}
+const IDLE_PROFILES := {
+	# 雕像：呼吸更沉、重心摆动更明显、上身摇摆更慢更柔；互不成整数比的频率让循环点看不出来。
+	"miku_statue": {
+		"breath_amp": 0.018, "breath_scale_amp": 0.009,
+		"sway_x_amp": 0.024, "sway_z_amp": 0.014,
+		"yaw_amp": 0.045, "roll_amp": 0.016, "pitch_amp": 0.012,
+		"breath_freq": 0.20, "sway_freq": 0.115, "sway_roll_freq": 0.155,
+		"harmonic": 0.22,
+	},
 }
 ## 自动缩放：把模型缩放到这个高度（米，按骨骼/网格范围估算）；设为 0 表示不自动缩放
 @export var auto_fit_height := 1.75
@@ -74,6 +99,8 @@ var _loaded_model: Node
 var _anim: AnimationPlayer
 var _procedural: MikuProceduralPose
 var _state_clips: Dictionary = {} # idle / walk / run / jump -> 动画名
+## 程序化待机微动作（呼吸 / 重心微移 / 上身摆动），插在 MikuModel 与载入模型之间
+var _idle_motion: MikuIdleMotion
 
 ## 第一人称时武器跟随的相机（由 player.gd 注入）；不设时退回模型节点下的默认位置
 var view_camera: Node3D
@@ -115,13 +142,31 @@ func set_first_person(on: bool) -> void:
 
 
 ## 每帧把武器摆到该在的位置：第一人称贴相机，第三人称贴右手骨骼
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_update_idle_intensity(delta)
 	if _weapon_mount == null:
 		return
 	if _first_person:
 		_follow_view_camera()
 	elif _weapon_follow:
 		_follow_hand_bone()
+
+
+## 待机微动作的强度：站 / 蹲时全开，趴下时收到 0（避免呼吸起伏把趴姿顶起来、和贴地互掐）。
+## 用 MikuModel 自己的世界「上方向」判定倾斜程度，不依赖具体调用方（player.gd / bot.gd 都适用），
+## 且带平滑（淡入淡出），姿态切换时不会突然跳一下。
+func _update_idle_intensity(delta: float) -> void:
+	if _idle_motion == null or not is_instance_valid(_idle_motion):
+		return
+	# 世界空间中模型「上方向」的 y 分量：1 = 直立，0 = 完全平躺
+	var up_y := global_transform.basis.orthonormalized().y.y
+	var target := clampf(inverse_lerp(0.55, 0.92, up_y), 0.0, 1.0)
+	_idle_motion.intensity = lerpf(
+		_idle_motion.intensity, target, 1.0 - exp(-IDLE_INTENSITY_BLEND * delta)
+	)
+
+## 待机强度淡入淡出速度（越大切得越快；10 ≈ 0.1 s 级）
+const IDLE_INTENSITY_BLEND := 10.0
 
 
 func _apply_model_visibility() -> void:
@@ -170,9 +215,12 @@ func load_model(path: String) -> bool:
 		(_loaded_model as Node3D).rotation.y = deg_to_rad(yaw)
 	add_child(_loaded_model)
 	_strip_mmd_physics_proxies(_loaded_model)
+	# 展示台道具要在量包围盒之前清掉，否则自动缩放会拿「舞台」当身高算（模型缩成玩偶）
+	_strip_presentation_props(_loaded_model, path)
 	_anim = _find_animation_player(_loaded_model)
 	_build_state_clips()
-	_fit_to_capsule(_loaded_model)
+	_fit_to_capsule(_loaded_model, path)
+	_start_idle_motion(_loaded_model, path)
 	if not _first_person:
 		_attach_weapon_to_hand(_loaded_model)
 	_start_procedural_pose(_loaded_model)
@@ -186,6 +234,33 @@ func load_model(path: String) -> bool:
 static func _yaw_correction_for(path: String) -> float:
 	var dir_name := path.get_base_dir().get_file() # res://assets/models/miku_statue/miku_statue.glb -> miku_statue
 	return float(MODEL_YAW_CORRECTION.get(dir_name, 0.0))
+
+
+## 逐模型待机参数：按目录名查 IDLE_PROFILES，查不到用 DEFAULT_IDLE_PROFILE
+static func _idle_profile_for(path: String) -> Dictionary:
+	var dir_name := path.get_base_dir().get_file()
+	var custom: Variant = IDLE_PROFILES.get(dir_name)
+	if custom is Dictionary:
+		# 以默认值为底，模型自己的键覆盖上去，个别键没写也能跑
+		var merged := DEFAULT_IDLE_PROFILE.duplicate()
+		merged.merge(custom, true)
+		return merged
+	return DEFAULT_IDLE_PROFILE
+
+
+## 在 MikuModel 与载入模型之间插一层 MikuIdleMotion，驱动程序化待机微动作。
+## 放在 _fit_to_capsule 之后：此时模型的缩放 / 落地偏移已算好，微动沿用它当基准。
+## MikuModel 自身的站 / 蹲 / 趴姿态（player.gd）作用在 MikuModel 上，与本层互不干扰。
+func _start_idle_motion(model: Node, path: String) -> void:
+	var model_3d := model as Node3D
+	if model_3d == null:
+		return
+	var idle := MikuIdleMotion.new()
+	idle.name = "IdleMotion"
+	add_child(idle)
+	# setup 会把 model_3d 挪到 idle 之下（保留它当前的局部变换），基准量在 setup 内捕获
+	idle.setup(model_3d, _idle_profile_for(path))
+	_idle_motion = idle
 
 
 ## 当前姿态下，模型最低点相对「玩家原点」（MikuModel 的父节点原点）的高度差。
@@ -256,10 +331,20 @@ func update_animation(delta: float, speed_mps: float, speed_ratio: float, moving
 	_anim.play(clip, fade_time)
 
 
-## 模型没有动画剪辑时，退回到「程序化姿态」：把 T-pose 的胳膊放下来 + 走/跑/跳的摆动
+## 模型没有「可用的状态动画剪辑」时，退回到「程序化姿态」：把 T-pose 的胳膊放下来 + 走/跑/跳的摆动。
+##
+## 注意：判定条件是「有没有匹配到 idle/walk/run 剪辑」，而不是「有没有 AnimationPlayer」——
+## 有些模型（如 miku_classic 只有一条叫 "Take 01" 的动画）有 AnimationPlayer 但名字对不上任何状态，
+## 如果只看 _anim != null 就会既不播动画、又不启用程序化姿态，角色僵在 T-pose。
 func _start_procedural_pose(model: Node) -> void:
 	_procedural = null
-	if _anim != null:
+	# 只有真的能播状态动画时才交给动画剪辑；否则一律尝试程序化姿态做兜底。
+	var has_state_clip := false
+	for state in ["idle", "walk", "run", "jump"]:
+		if String(_state_clips.get(state, "")) != "":
+			has_state_clip = true
+			break
+	if has_state_clip:
 		return
 	var skeleton := _find_skeleton(model)
 	if skeleton == null:
@@ -268,10 +353,14 @@ func _start_procedural_pose(model: Node) -> void:
 	pose.holding_weapon = _holding_weapon
 	if pose.setup(skeleton, self):
 		_procedural = pose
-		print("MikuModel：模型没有动画，已启用程序化姿态 ", pose.debug_names)
+		print("MikuModel：没有可用的状态动画剪辑，已启用程序化姿态 ", pose.debug_names)
 
 
 func _clear_loaded_model() -> void:
+	# 待机微动作节点（IdleMotion）是 MikuModel 的子节点，不随 _loaded_model 一起释放，要单独清掉
+	if _idle_motion != null and is_instance_valid(_idle_motion):
+		_idle_motion.queue_free()
+	_idle_motion = null
 	if _loaded_model == null or not is_instance_valid(_loaded_model):
 		return
 	_detach_weapon_back()
@@ -482,7 +571,9 @@ const PLACEHOLDER_BOTTOM_Y := -0.9
 
 
 ## 把模型缩放 / 对齐到占位胶囊的尺寸（很多 FBX/MMD 转出的模型是“几十米巨人”）
-func _fit_to_capsule(model: Node) -> void:
+##
+## path 目前只用于保留「逐模型微调」的扩展点（见 MODEL_FIT_SCALE 注释）。
+func _fit_to_capsule(model: Node, path: String) -> void:
 	var model_3d := model as Node3D
 	if model_3d == null:
 		return
@@ -492,11 +583,33 @@ func _fit_to_capsule(model: Node) -> void:
 	if auto_fit_height > 0.0:
 		model_3d.scale *= auto_fit_height / bounds.size.y
 		bounds = _measure_bounds(model)
-	if not is_equal_approx(model_scale, 1.0):
-		model_3d.scale *= model_scale
+	# 逐模型微调倍率：自动缩放是「把整个包围盒压到 auto_fit_height」，
+	# 若某模型包围盒里绝大多数是「非身高」部分（长武器 / 极长马尾），角色会被压小。
+	var extra := model_scale * _fit_scale_for(path)
+	if not is_equal_approx(extra, 1.0):
+		model_3d.scale *= extra
 		bounds = _measure_bounds(model)
 	model_3d.position.y += PLACEHOLDER_BOTTOM_Y - bounds.position.y
 	model_3d.position += position_offset
+
+
+## 逐模型「自动缩放微调」倍率（键 = 模型目录名；缺省 1.0，即完全信任自动缩放）。
+##
+## 目前是空的 —— 实测四个模型的自动缩放都已经合理，不需要补正：
+##   模型            头顶骨 y   包围盒跨度   自动倍率   身体实际高度
+##   miku_classic      6.695      7.664      0.228      1.53 m
+##   cat_hatsune       2.435      2.979      0.588      1.43 m
+##   miku_statue       —（无骨骼，走网格包围盒）0.090     1.77 m
+## 身体高度都在 1.4~1.8 m 区间，符合预期（曾试给 miku_classic 补 1.35，身体变 2.24 m，明显过大）。
+##
+## 什么时候才需要往这里加值：某模型「自动缩放后角色明显不成比例」时。
+## 重新判定方法：量「头顶骨 y ÷ 包围盒跨度」得到身体占比，再和目标身高相除。
+const MODEL_FIT_SCALE := {}
+
+
+func _fit_scale_for(path: String) -> float:
+	var dir_name := path.get_base_dir().get_file()
+	return float(MODEL_FIT_SCALE.get(dir_name, 1.0))
 
 
 ## 估算模型在 MikuModel 局部空间里的包围盒。
@@ -550,7 +663,10 @@ func _bounds_of(points: Array[Vector3]) -> AABB:
 	return result
 
 
-## mmd_tools 导出的 glb 常把物理刚体 / 关节占位物件也带进来（渲染出来是一堆白盒子），这里清理掉
+## mmd_tools 导出的 glb 常把物理刚体 / 关节占位物件也带进来（渲染出来是一堆白盒子），这里清理掉。
+## 另外有些 Sketchfab 导出会把「展示台」整套带进来（地面 / 灯 / 摄像机），
+## 那些在游戏里会渲染成角色脚下的一块白板 + 悬浮物件，且会污染包围盒测量（自动缩放算错）。
+## 展示台只对**表里点名的模型**清理（MODEL_STRIP_PROPS），避免误删 miku.glb 自带的 Light / Camera（那是既有功能要用的）。
 func _strip_mmd_physics_proxies(model: Node) -> void:
 	var proxies: Array[Node] = []
 	_collect_mmd_proxies(model, proxies)
@@ -558,6 +674,54 @@ func _strip_mmd_physics_proxies(model: Node) -> void:
 		proxy.queue_free()
 	if not proxies.is_empty():
 		print("MikuModel：已移除 %d 个 MMD 物理占位网格" % proxies.size())
+
+
+## 逐模型「展示台道具」清理名单（键 = 模型目录名；值为该模型要删掉的节点名小写关键字）。
+## 只删**命中关键字**的节点（连同子树），其余一律保留。
+const MODEL_STRIP_PROPS := {
+	# Sketchfab 导出带整套展示台：Floor（6.8×6.8 白板）、Lamp / Lamp2（空节点）；Hairshadow 是头发投影片，角色身上不需要
+	"miku_classic": ["floor", "lamp", "hairshadow"],
+	# cat_hatsune_miku 自带一块 Plane_001_122 平面（疑似底座），一并清掉
+	"cat_hatsune_miku": ["plane_001"],
+}
+
+
+func _strip_presentation_props(model: Node, path: String) -> void:
+	var dir_name := path.get_base_dir().get_file()
+	var keywords: Variant = MODEL_STRIP_PROPS.get(dir_name)
+	if not (keywords is Array):
+		return
+	var targets: Array[Node] = []
+	_collect_named_nodes(model, keywords, targets)
+	for node in targets:
+		# 用 free() 而不是 queue_free()：紧接着就要量包围盒，
+		# queue_free 要到帧末才真正释放，这帧量到的还是带舞台的尺寸（自动缩放会算错）。
+		_detach_and_free(node)
+	if not targets.is_empty():
+		print("MikuModel：已移除 %d 个展示台道具节点（%s）" % [targets.size(), dir_name])
+
+
+## 从父节点摘下来再立即释放（free 不能在「自己子树内」的回调里调用，先 detach 更稳）
+func _detach_and_free(node: Node) -> void:
+	var parent := node.get_parent()
+	if parent != null:
+		parent.remove_child(node)
+	node.free()
+
+
+## 广度优先收名字命中关键字的节点；命中即整棵子树带走，不再往下找
+func _collect_named_nodes(node: Node, keywords: Array, out: Array[Node]) -> void:
+	for child in node.get_children():
+		var lower_name := String(child.name).to_lower()
+		var hit := false
+		for keyword in keywords:
+			if lower_name.contains(String(keyword)):
+				hit = true
+				break
+		if hit:
+			out.append(child)
+			continue
+		_collect_named_nodes(child, keywords, out)
 
 
 func _collect_mmd_proxies(node: Node, out: Array[Node]) -> void:
