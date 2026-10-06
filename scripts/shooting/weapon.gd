@@ -334,6 +334,8 @@ func _hitscan() -> Vector3:
 		if collider != null and collider.has_method("take_damage"):
 			var killed := _deal_damage(collider)
 			hit_confirmed.emit(_display_name_of(collider), killed)
+			if killed:
+				_report_kill_if_player(collider)
 		else:
 			_show_impact(hit.position, hit.normal)
 
@@ -372,6 +374,40 @@ func _display_name_of(node: Object) -> String:
 	if value != null:
 		return str(value)
 	return str(node.name)
+
+
+## EP-3 / ES-3.2（附录 A.7）：致命命中后把击杀上报给 ScoreManager。
+##
+## 归因路径：`collider` 即被击中节点，**玩家节点名 = peer id**（`main.gd::_make_player()`），
+##   由 `ScoreManager.resolve_victim_id()` 安全解析（非玩家 / 非数字名字 → -1，跳过）。
+##
+## 分支（附录 A.7 + ⚑L-5 + ⚑F-2）：
+##   · bot（`is_in_group("bot")`）：**纯本地**结算。离线时本地 +1；**联机局不计入**（人机不进正式对局）。
+##   · 玩家（`victim_id >= 0`）：交 `ScoreManager._report_local_kill()` —— 权威直调 / 客户端 `report_kill.rpc_id(1, ...)`。
+##
+## ⚠ 只在本端武器 authority 下执行（`weapon.gd::_hitscan` 只由本端 input 触发，见 `_physics_process` 的
+##   `is_multiplayer_authority()` 闸门），故不会出现「多端重复上报同一击杀」。
+func _report_kill_if_player(collider: Object) -> void:
+	var score := _score_manager()
+	if score == null:
+		return # 场景未挂 ScoreManager（例如纯武器测试场景）：静默跳过，不影响原有命中反馈
+	if collider is Node and (collider as Node).is_in_group("bot"):
+		# 人机：离线 / 训练模式才计分；联机局不计入（附录 A.9 人机击杀 / ⚑L-5）
+		if not NetworkManager.is_online:
+			(score as ScoreManager)._apply_bot_kill(score.local_peer_id())
+		return
+	var victim_id := ScoreManager.resolve_victim_id(collider)
+	if victim_id < 0:
+		return # bot / 训练靶 / 场景物件：无主伤害，不产生击杀条目
+	(score as ScoreManager)._report_local_kill(victim_id)
+
+
+## 取本场景的 ScoreManager（未挂载时返回 null）。
+func _score_manager() -> ScoreManager:
+	var scene := get_tree().current_scene if is_inside_tree() else null
+	if scene == null:
+		return null
+	return scene.get_node_or_null("ScoreManager") as ScoreManager
 
 
 func _build_effects() -> void:

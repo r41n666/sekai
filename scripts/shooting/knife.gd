@@ -111,3 +111,30 @@ func _slash() -> void:
 		collider.take_damage(damage)
 	var value = collider.get("display_name")
 	hit_confirmed.emit(str(value) if value != null else String((collider as Node).name), killed)
+	# EP-3 / ES-3.2（附录 A.7）：致命时上报击杀（与 weapon.gd 同一归因路径）。
+	if killed:
+		_report_kill_if_player(collider)
+
+
+## EP-3 / ES-3.2（附录 A.7）：致命命中后把击杀上报给 ScoreManager。
+## 与 `weapon.gd::_report_kill_if_player()` 保持同一口径：bot → 仅离线本地 +1；
+## 玩家 → 由 `ScoreManager.resolve_victim_id()` 安全解析节点名（= peer id）后上报。
+func _report_kill_if_player(collider: Object) -> void:
+	var score := _score_manager()
+	if score == null:
+		return
+	if collider is Node and (collider as Node).is_in_group("bot"):
+		if not NetworkManager.is_online:
+			score._apply_bot_kill(score.local_peer_id())
+		return
+	var victim_id := ScoreManager.resolve_victim_id(collider)
+	if victim_id < 0:
+		return
+	score._report_local_kill(victim_id)
+
+
+func _score_manager() -> ScoreManager:
+	var scene := get_tree().current_scene if is_inside_tree() else null
+	if scene == null:
+		return null
+	return scene.get_node_or_null("ScoreManager") as ScoreManager
