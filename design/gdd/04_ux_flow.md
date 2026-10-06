@@ -107,6 +107,18 @@
 | 数据 | 复用 `player.died` 信号 + `player.respawn()`；**无需新系统** |
 | 竞速公平 | 重生点 = **离最近敌人最远的出生点**（`01_core_loop.md` §6「复活选点」），避免重生即被架枪 |
 
+### 3.4 加载 3-2-1 倒计时（对局开始）
+
+| 项 | 规格 |
+| --- | --- |
+| 触发 | `match_state → COUNTDOWN`（房主状态机）；**客户端唯一信息源 = `01_core_loop.md` 附录 A.4 的 `sync_match_state`**（设计裁定已定稿） |
+| 显示 | 屏幕**中央**大号数字「3 / 2 / 1」覆盖层；本地按 `countdown_remaining` 平滑递减，`sync_match_state` 心跳（1 s）校正 |
+| 输入 | COUNTDOWN 全程 `set_input_blocked(true)`；进入 `LIVE` 时 `false` + 重新 `capture_mouse()`（见 §4 矩阵） |
+| 目的 | 避免「谁先加载完谁先开枪」——本 UI 与 §4 规则 3 是同一要求的「表现 + 逻辑」两面 |
+| 模态 | **非模态**覆盖层（不进 `game_ui` 互斥组；无按钮） |
+| 离线 | 本端即权威，直接本地倒计时 |
+| **依赖** | **`sync_match_state` RPC（`01_core_loop.md` 附录 A.4）—— 与 EP-4 ES-4.4 同批实现** |
+
 ---
 
 ## 4. 输入屏蔽矩阵
@@ -126,7 +138,7 @@
 **规则**：
 1. 任意**模态**界面打开 → `set_input_blocked(true)`，关闭 → `false` 并重新 `capture_mouse()`。**例外：`Tab` 完整榜为非模态覆盖层，不触发屏蔽**（见 §3.1.1）。
 2. **换弹是唯一「跨界面继续」的计时**（现状行为，`weapon.gd::_process()` 在 `_trigger_enabled=false` 时仍 `_update_reload()`）——**保留**。
-3. 加载倒计时**冻结输入**（`01_core_loop.md` §5 状态机新增「3-2-1 倒计时」），避免「谁先加载完谁先开枪」。
+3. 加载倒计时**冻结输入**（`01_core_loop.md` §5.1 状态机「3-2-1 倒计时」），避免「谁先加载完谁先开枪」。**客户端由此得知 COUNTDOWN 的触发时机，仅来自 `sync_match_state`**（`01_core_loop.md` 附录 A.4，设计裁定已定稿）——**这是规则 3 可实现的前提**。
 4. **不暂停游戏**（对齐 README §12）：界面是覆盖层。
 
 ---
@@ -197,7 +209,7 @@
 | Tab 完整榜 | `hud.gd` + `project.godot` | 新增 `scoreboard` 输入动作（默认 `Tab`）+ 非模态覆盖面板，不屏蔽输入 | 低 |
 | 结算面板 | 新增 `match_result.tscn/.gd` | 新界面（参照 `death_screen`） | 低 |
 | 重生倒计时 | `death_screen.gd` + `player.gd::respawn()` | 加 3 s 倒计时 | 低 |
-| 加载倒计时 | `network_manager.gd` + `main.gd` | 新增 3-2-1 冻结 | 低 |
+| 加载倒计时 | `network_manager.gd` + `main.gd` + `score_manager.gd` | 新增 3-2-1 冻结；客户端由 `sync_match_state` 获知 | 低（**依赖 `sync_match_state` RPC，见 `01_core_loop.md` 附录 A.4**） |
 | 比分数据 | 见 `01_core_loop.md` 附录 A | 新 `ScoreManager` | 中（RPC 时序） |
 | 敌我分组解耦 | `weapon.gd`/`knife.gd`/`minimap.gd`/`teammate_icons.gd` | 解耦伤害路由与显示分组 | **中（关键回归 AC-F2）** |
 

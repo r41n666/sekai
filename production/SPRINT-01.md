@@ -99,7 +99,7 @@
 
 | 冲刺 | 主题 | 主要内容 |
 | --- | --- | --- |
-| **S2** | 「场地与表现成型」 | EP-4 HUD/UX 全部（比分板 / 结算 / 重生倒计时 / 加载倒计时）+ EP-1 竞技场（12 掩体 + 碰撞层）→ **此时可玩性首次完整**。⚠ **ES-4.4（加载倒计时 + 冻结输入）前置：需 EP-3 补状态同步 RPC `sync_match_state`**（`01_core_loop.md` 附录 A.4 已提增补建议，待设计确认；客户端无状态迁移消息则倒计时不可实现） |
+| **S2** | 「场地与表现成型」 | EP-4 HUD/UX 全部（比分板 / 结算 / 重生倒计时 / 加载倒计时）+ EP-1 竞技场（12 掩体 + 碰撞层）→ **此时可玩性首次完整**。✅ **ES-4.4（加载倒计时 + 冻结输入）前置已定稿**：EP-3 补状态同步 RPC `sync_match_state`（`01_core_loop.md` 附录 A.4 已由 design-strategist 正式裁定；UI 规格见 `04_ux_flow.md §3.4`），客户端据此获知 COUNTDOWN 触发时机 |
 | **S3** | 「打磨与可访问性」 | EP-4.5 FFA 显示一致性 + EP-5 手雷权威 / 受伤音效 / 外观同步评估 + EP-1.5 |
 | **S4（候选）** | 「可读性修复」 | EP-4 的 H1 描边 / H2 假接触阴影（⚠ 实现方式待工程验证，降级路径见 `asset_spec_arena.md §6.5`），验收底线 **SR-4「25 m 可识别」** |
 | **S5（候选）** | 「发布准备」 | 构建/版本/补丁说明（阶段 7，`release-ops-lead`） |
@@ -131,3 +131,4 @@
 | 2026-10-06 | G1 判据补注：第 4 用例为 AC-F1 运行时断言 `test_friendly_group_empty_in_ffa`（此前 suite 只有 3 个源码字符串用例，运行时缺口已补）；EP-2 实测 `test_damage_routing` 4 用例 / 8 断言全绿 | 程基岩（engineering-lead） |
 | 2026-10-06 | G2 判据补充：`test_score_manager.gd` 随 EP-3/ES-3.2~3.4 扩至 **30 用例 / 115 断言**（原 12 / 32），覆盖「15 杀触发 / 5 分钟超时 / 平分比 deaths / 中途离开」四路径 **+** 击杀上报核心 / 归因安全解析 / 状态机迁移 / 同步应用 / 信号双路径；G2 的用例数基线由 12 提至 30。全量回归 **50 用例 / 175 断言 / 0 失败 / exit 0** | 程基岩（engineering-lead） |
 | 2026-10-06 | **S2 前置依赖登记**：ES-4.4（加载 3-2-1 倒计时 + 冻结输入）依赖 EP-3 补一条状态同步 RPC `sync_match_state`（房主→全端，载荷 `state, countdown_remaining`）——`01_core_loop.md` 附录 A.4 已提增补建议（待 design-strategist 确认），A.9.1 记录了客户端临时推断规则；**手雷击杀缺口**登记进 EP-5 ES-5.1（手雷击杀不计入比分，依赖权威结算落地后接入 `report_kill`） | 程基岩（engineering-lead） |
+| 2026-10-06 | **S2 前置已定稿**：design-strategist 裁定认可 `sync_match_state`（方向 A）——`01_core_loop.md` 附录 A.4 该行转正式契约、A.9.1 近似解作废（改「客户端状态跟随规则」）；新增 `01_core_loop.md §5.1` 与 `04_ux_flow.md §3.4` 倒计时 UI 规格；EP-4 ES-4.4 前置改「已确认」；`99_consistency_review.md` 追加流程教训（跨端要求须写信息来源） | 文策渊（design-strategist） |

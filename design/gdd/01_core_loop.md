@@ -172,6 +172,17 @@
 - **全员死亡同时达成** → 以「达成条件的那一刻」先生效者胜（服务器 `is_server` 裁决）。
 - **时间到 + 平分** → 死亡数少者胜；仍平 → 并列入胜（MVP 简化）。
 
+### 5.1 加载倒计时 UI（对接 §4 规则 3 / `04_ux_flow.md §4` / EP-4 ES-4.4）
+
+| 项 | 规格 |
+| --- | --- |
+| 触发 | `ScoreManager.match_state → COUNTDOWN`；**客户端由 `sync_match_state`（附录 A.4）获知** |
+| 显示 | 屏幕**中央**大号数字「3 / 2 / 1」（覆盖层，不进 `game_ui` 互斥组）；数据源 = `sync_match_state.countdown_remaining`（本地按 1 s 递减平滑，心跳校正） |
+| 输入 | COUNTDOWN 全程 `set_input_blocked(true)`；→ `LIVE` 时 `false` 并 `capture_mouse()`（对齐 `04_ux_flow.md §4` 输入屏蔽矩阵「加载 / 3-2-1 倒计时」行） |
+| 目的 | 避免「谁先加载完谁先开枪」（`04_ux_flow.md §4` 规则 3） |
+| 离线 | 本端即权威，直接本地倒计时，无 RPC |
+| 依赖 | **`sync_match_state` RPC（A.4）——同批实现** |
+
 ---
 
 ## 6. 与现有代码的接缝（工程可执行清单）
@@ -268,7 +279,7 @@ IDLE ──(对局加载完成)──▶ COUNTDOWN(3s) ──▶ LIVE ──(胜
 | `sync_scores` | 房主 → 全端 | `authority` / `reliable` | `scores: Dictionary, time_remaining: float` | 变更时 + 每 1 s 心跳 |
 | `match_ended` | 房主 → 全端 | `authority` / `reliable` | `winner_id: int, final_scores: Dictionary` | 触发结算面板 |
 | `match_reset` | 房主 → 全端 | `authority` / `reliable` | — | 「再来一局」复位 |
-| `sync_match_state` ⚠**待设计确认** | 房主 → 全端 | `authority` / `reliable` | `state: int, countdown_remaining: float` | ⚠ **工程实现反馈（ES-3.3/3.4，待 design-strategist 确认）**：用于客户端精确显示 3-2-1 倒计时并在 COUNTDOWN 期间冻结输入（ES-4.4）。**触发时机**：状态迁移时 + COUNTDOWN 期间每 1 s 心跳（与 `sync_scores` 心跳同频）。**必要性**：附录 A.4 原 4 条消息里没有状态迁移消息 → 客户端无法得知 COUNTDOWN 何时开始 → **`04_ux_flow.md §4 规则 3` / `EP-4 ES-4.4` 的「冻结输入 + 加载倒计时」在缺本消息时不可实现**（当前工程实现以「收 `sync_scores` 推断 LIVE」为临时近似解，客户端看不到 3-2-1）。 |
+| `sync_match_state` ✅**已定稿（设计裁定）** | 房主 → 全端 | `authority` / `reliable` | `state: int, countdown_remaining: float` | **来源**：工程实现反馈（EP-3 / ES-3.3~3.4，commit `8b0e479`），设计侧于本轮回填裁定。**用途**：客户端精确跟随房主 `match_state`（含 `countdown_remaining`），用于 ① COUNTDOWN 期间显示 3-2-1；② 在 COUNTDOWN 期间冻结输入（`set_input_blocked(true)`）。**触发时机**：状态迁移时（`IDLE→COUNTDOWN`、`COUNTDOWN→LIVE`、`LIVE→ENDED`）+ COUNTDOWN 期间每 1 s 心跳（与 `sync_scores` 心跳同频）。**必要性**：本条是 `04_ux_flow.md §4 规则 3` / `EP-4 ES-4.4`「加载倒计时 + 冻结输入」的**唯一触发信息来源**——缺它则客户端无法得知 COUNTDOWN 何时开始，ES-4.4 不可实现。**权威**：房主状态机是唯一真源，客户端**不得**本地推断（见 A.9.1 已作废的临时近似解）。 |
 
 ## A.5 信号（供 HUD 绑定）
 - `score_changed(scores: Dictionary, time_remaining: float)`
@@ -301,21 +312,22 @@ IDLE ──(对局加载完成)──▶ COUNTDOWN(3s) ──▶ LIVE ──(胜
 | 人机击杀 | **离线计分；联机局不计入**（对齐 `04_ux_flow.md` ⚑F-2 / `01_core_loop.md` ⚑L-5） |
 | 时间到 + 平分 | `deaths` 少者胜；仍平 → `winner_id = -2`（平局） |
 
-### A.9.1 客户端状态推断规则 ⚠**待设计确认（工程实现反馈）**
-> **来源**：EP-3 / ES-3.3~3.4 工程实现（commit `8b0e479`）。**待 design-strategist 确认后定稿。**
+### A.9.1 客户端状态跟随规则 ✅**已定稿（设计裁定 · 方向 A）**
+> **来源**：EP-3 / ES-3.3~3.4 工程实现（commit `8b0e479`）；**设计侧裁定**：认可并定稿 `sync_match_state`（A.4），本近似解**作废**。
 
-A.4 原 4 条消息里没有「状态迁移」消息，客户端无法被精确告知当前 `match_state`。**在 `sync_match_state`（见 A.4 增补行）落地前**，当前工程实现采用以下**临时近似解**：
+**裁定**：客户端**唯一**通过 A.4 的 `sync_match_state` 得知 `match_state` 迁移；**禁止**用「收 `sync_scores` 推断 LIVE」近似（该近似无法得知 COUNTDOWN，会导致倒计时不显示 + 输入不冻结）。
 
-| 客户端收到 | 推断的 `match_state` | 说明 |
+| 客户端收到 | `match_state` | 精度 |
 | --- | --- | --- |
-| 本地初始 | `IDLE` | 场景就绪 |
-| `sync_scores`（且本地仍为 `IDLE`） | `LIVE` | **近似**：收同步 = 对局进行中（无法得知 COUNTDOWN 阶段） |
-| `match_ended` | `ENDED` | 精确 |
-| `match_reset` | `IDLE` | 精确 |
+| 本地初始（尚未收到任何 `sync_match_state`） | `IDLE` | 本地默认；收到首条 `sync_match_state` 即以房主为准 |
+| `sync_match_state(state=S_COUNTDOWN, countdown_remaining=r)` | `COUNTDOWN` | **精确**（房主真源）；据此显示 3-2-1 + `set_input_blocked(true)` |
+| `sync_match_state(state=S_LIVE, …)` | `LIVE` | 精确；解冻输入、启动本地计时显示（以 `sync_scores.time_remaining` 校准） |
+| `match_ended` | `ENDED` | 精确（保留） |
+| `match_reset` | `IDLE` | 精确（保留） |
 
-**已知缺陷**：客户端**不会显示 3-2-1 倒计时**，且无法在 COUNTDOWN 期间冻结输入（它不知道 COUNTDOWN 何时开始）。
-**升级路径**：落地 A.4 增补的 `sync_match_state` 后，客户端改为**精确**跟随房主状态（含 `countdown_remaining`），上表近似规则作废。
-→ **这条升级路径是 EP-4 ES-4.4 的前置依赖**（见 `production/epics/EP-4-hud-and-ux.md` ES-4.4）。
+- **RPC 容错**：`sync_match_state` 丢失由**每 1 s 心跳**兜底（见 A.4）；客户端在 `IDLE` 下若收到 `sync_scores`（说明已进 `LIVE`）→ **不推断状态、但记录分数**，并等待下一条 `sync_match_state` 校正（心跳 ≤1 s）。
+- **离线**：`is_online == false` 时本端即权威，直接驱动本地状态机，无需 RPC。
+- → 本规则是 `EP-4 ES-4.4` 的**直接前置**；`sync_match_state` 与 ES-4.4 **同批实现**。
 
 ## A.10 与现有脚本的接缝
 | 脚本 | 改动 | 复用 |
