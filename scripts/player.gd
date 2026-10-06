@@ -365,9 +365,24 @@ static func clamp_display_health(value: float, maximum: float) -> float:
 	return clampf(value, 0.0, maxf(maximum, 0.0))
 
 
-## 远端血量显示值的上限来源。**故意用本端 `max_health`**：
-##   双方 `max_health` 来自同一份 `player.tscn` 的 export 默认值（场景未覆盖它）→ 跨端一致；
-##   若未来两端配了不同上限，本端按自己的上限夹取 —— 显示态以本端 UI 口径为准。
+## 远端血量显示值的上限来源。
+##
+## ## ⚠ D2-04：`max_health` 变成「可配置的全局规则」后，本方法的**前提变了**
+## 原注释的前提是「双方 `max_health` 来自同一份 `player.tscn` 的 export 默认值
+##（场景未覆盖它）→ 跨端一致」。规则配置化后该前提**不再自动成立**：
+## 房主配 200 血而配置未同步到对端时，对端 `max_health` 仍是 100，
+## 而它会把收到的 200 判成「超max_health = 协议污染」→ **整条丢弃** →
+## **血条永远不动且不报错**（形态与 C-18「比分永远 0」同源）。
+##
+## ## 采纳方案（规格 §6.4 冲突 1）
+##   ① `max_health` 视为**必须跨端一致的全局规则**，随 `sync_ruleset` 开局前下发两端；
+##   ② 本方法读「**本端已应用的本局配置值**」（`apply_player_stats` 会写 `max_health`，
+##      并连带同步 `health`）—— 即仍读本端 `max_health`，但现在两端保证相同；
+##   ③ **守卫语义一字未改**：`value > max_health` 仍判协议污染、仍整条丢弃
+##      （ADR-008 铁律 + `test_health_sync.gd:350/351` 用 `10000.0` / `100.5` 钉死）。
+##
+## → 所以本方法**逻辑不变**、只是它读取的 `max_health` 现在**两端必然相同**
+##   （由 `sync_ruleset` 保证，而非由「场景没覆盖它」保证）。
 func get_display_max_health() -> float:
 	return maxf(max_health, 1.0)
 

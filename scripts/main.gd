@@ -23,12 +23,33 @@ func _ready() -> void:
 		_sync_players()
 	else:
 		_players.add_child(_make_player(1, NetworkManager.player_name))
+	# D2-04：规则集到手（含**客户端**收到 `sync_ruleset` 之后）→ 补应用一次属性。
+	#   ⚠ 为什么 `_make_player` 的「入树前应用」还不够：客户端的玩家节点在
+	#     本函数里就建好了，而 `sync_ruleset` 是 COUNTDOWN 前才到的
+	#     —— 客户端**根本没机会**在入树前应用。
+	#   ⚠ 不补这一条的后果（ADR-008 冲突 1，规格 §6.4）：客户端 `max_health`
+	#     停留在场景默认值 100，房主配 200 时客户端会把血量广播
+	#     判成「超max_health = 协议污染」→ **永久丢弃 → 血条永远不动且不报错**。
+	if _score.has_signal("ruleset_applied"):
+		_score.ruleset_applied.connect(_on_ruleset_applied)
 	# EP-3 / ES-3.3：把本局玩家列表喂给 ScoreManager（A.9 迟到加入 / 中途离开的实际数据入口）。
 	sync_scoreboard()
 	# 对局加载完成 → 触发 COUNTDOWN（A.2 状态图「对局加载完成」的落点）。
 	#   只由权威端推进；客户端等房主的 `sync_scores` / 状态同步。
 	#   ⚠ 本端玩家节点已在上面创建完毕、`Players` 子节点就绪 → 此刻冻结输入才有对象可冻。
 	_score.start_match()
+
+
+## D2-04：规则集生效 → 把属性补应用到**已存在**的玩家节点（补上「入树前应用」覆盖不到的那条路径）。
+##   ⚠ 入树后补应用时 `PlayerStats` 会连带同步 `health`（规格 §6.3），
+##     因此不会出现「改了上限但血条还是旧值」。
+func _on_ruleset_applied(_ruleset_id: String) -> void:
+	var overrides := _player_stat_overrides()
+	if overrides.is_empty():
+		return
+	var can_configure := _can_configure_stats()
+	for child in _players.get_children():
+		PlayerStats.apply_player_stats(child, overrides, can_configure)
 
 
 ## 按最新玩家列表补齐 / 移除玩家节点（所有端一致，幂等）
@@ -63,7 +84,33 @@ func _make_player(id: int, player_name: String) -> Node:
 	player.player_name = player_name
 	player.position = _spawn_point_for(id, _ordered_peer_ids())
 	player.set_multiplayer_authority(id)
+	# ── D2-04：玩家属性应用（**必须在 add_child 之前**）──
+	#   ⚠⚠ 时机铁律（规格 §6.3）：`player.gd::_ready()` 第 120 行执行
+	#     `health = max_health`。若在 `add_child()` **之后**才写属性，
+	#     `health` 已被定死 → 表现为「改了血量上限但血条还是 100」，**且不报任何错**。
+	#   ⚠ 客户端对**战斗属性只读**（规格 §6.2）：属性由权威端配置并经
+	#     `sync_ruleset` 下发，本端不是权威时 `apply_player_stats` 会拒绝写入。
+	#     —— 这不是"客户端不能配血量"的小限制，而是 P2P 无服务器权威（ADR-006）下
+	#     `max_health` / `damage` **没有任何一端做二次校验**的开作面闸门。
+	PlayerStats.apply_player_stats(player, _player_stat_overrides(), _can_configure_stats())
 	return player
+
+
+## 本局玩家属性覆盖集（配置层）。
+##   本期无房主配置面板（规格 §9 Q4 用户已拍板不做），故读权威端已下发的规则集
+##   —— 未来接上 UI 时，只需改这一个函数的来源，属性应用链路无需改动。
+func _player_stat_overrides() -> Dictionary:
+	if _score == null:
+		return {}
+	return _score.active_ruleset().player_defaults()
+
+
+## 本端能否配置玩家属性（规格 §6.2 公平性分档）。
+##   离线 / 训练模式、联机房主 → 可以；联机客户端 → 只读。
+func _can_configure_stats() -> bool:
+	if _score == null:
+		return true
+	return _score.is_authority()
 
 
 ## 房间内已排序的 peer id 列表（所有端一致，作为出生点稳定分配的序号来源）。

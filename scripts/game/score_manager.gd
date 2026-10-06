@@ -94,10 +94,36 @@ signal countdown_updated(remaining: float)
 ## → 结论：**显式事件**，不靠状态差分推断（与 `countdown_updated` 的取舍同源）。
 signal match_reset
 
+## ── D2-04 增补（2026-10-06，**纯增量**，不改任何既有信号签名）──
+## 本局规则集已生效（权威端 `set_ruleset` / 客户端收到 `sync_ruleset`）。
+##
+## ## 为什么必须单列一条（不是"加个字段让 UI 轮询"）
+##   ① `main.gd` 需要在**规则集到手后**把玩家属性补应用一遍：
+##      客户端的玩家节点在场景 `_ready()` 阶段就建好了，而 `sync_ruleset`
+##      是 COUNTDOWN 前才到的 —— 只靠 `main.gd::_make_player()` 的
+##      "入树前应用"覆盖不到这条路径。
+##      → 不补这一条，客户端 `max_health` 停留在场景默认值，
+##       房主配 200 血时客户端会**永久丢弃**血量广播（ADR-008 守卫，
+##        `value > max_health` 判协议污染）→ **血条永远不动且不报错**。
+##   ② 比分板需要据此刷新目标文案（配置成 3 杀时显示「先到 3 杀」）。
+##      否则只能等下一次比分变更（≤1 s 心跳）才更新 —— 能用但不该拖。
+##
+## ## 载荷：`ruleset_id: String`（跨端一致性核对用）
+##   与 A.4 `sync_ruleset` 的 `ruleset_id` 同名字段、同一取值。
+## ## 契约增量性
+##   **既有 5 条信号签名一律未动** —— 与 A.5 已有裁定先例一致
+##   （`countdown_updated` / `match_reset` 都是这样加的：新增独立信号 = 纯增量、零外溢）。
+signal ruleset_applied(ruleset_id: String)
+
 ## ── A.3 字段（默认值必须与契约完全一致，测试断言）──
 ## 当前状态机状态（见 MatchState）
 var match_state: int = MatchState.IDLE
 ## 击杀目标（上限，达到即结束）
+##   ⚠ D2-04 纪律：**这是内置默认规则集阈值的唯一真值来源**（规格 §7.1）。
+##     既有测试直接写它（`mgr.kill_target = 3`），因此规则集**不得**在配置里
+##     另写一份 15 —— 那样改字段就不会改判定。
+##   ⚠ 若本局下发了自定义规则集（`_ruleset != null`），**生效值以规则集为准**，
+##     本字段退化为「内置默认的阈值」。见 `effective_kill_target()`。
 var kill_target: int = 15
 ## 对局时长上限（秒）
 var match_duration: float = 300.0
@@ -116,6 +142,16 @@ var _sync_accum: float = 0.0
 var _sync_received := 0
 ## 计数：本端收到过多少次结算广播（调试用）
 var _ended_received := 0
+
+## ── D2-04 规则配置化（A.4 新增 `sync_ruleset`）──
+## 本局生效的自定义规则集（`null` = 用内置默认 `ffa_kill15`）。
+##   · 权威端：由 `set_ruleset()` 设置（未来的房主配置面板入口）。
+##   · 客户端：由 `net_sync_ruleset` 收到房主下发后写入（**只用于显示，不判定**）。
+## ⚠ 客户端**不求值**：判定只在权威端（规格 §7.4）。客户端持有配置只为
+##   ① HUD 目标文案② 玩家属性两端一致（`max_health` 见 ADR-008 冲突 1）。
+var _ruleset: MatchRuleset = null
+## 已下发/已收到的规则集 id（跨端一致性核对；不一致要 `push_warning`）。
+var _ruleset_id_synced := ""
 
 ## ── 测试可调开关（**不得**改变契约默认值）──
 ## 由测试置 false 关闭 `_process` 自动驱动，改为手工调 `_drive_countdown` / `_tick_live`
@@ -194,10 +230,146 @@ func _evaluate_winner() -> int:
 
 ## A.6 结束条件：有人达到 kill_target，或时间耗尽。
 ##   纯读状态，不写任何状态 → 可单测。
+##
+## ## D2-04：内部已换实现（规格 §5.1/ §7.2 M3）
+##   原来是两条写死判断，现在求值 `RuleSet`（规则配置化）。
+##   ⚠ **签名与语义均未变** —— 既有 30 条计分测试多处直接调用本方法。
+##   ⚠ 判定**逐位等价**：默认规则集 `ffa_kill15` 的两个阈值
+##     **读本对象的 `kill_target` / `match_duration` 字段**（规格 §7.1），
+##     不是配置里另写一份 15 / 300.0。否则 `mgr.kill_target = 3`
+##     （`test_score_manager.gd:348`）与 `mgr.match_duration = 10.0`（`:329`）会当场失效。
+##   ⚠ `RuleSet.evaluate()` 是纯函数（不碰 multiplayer / 场景树 / 时间），
+##     headless 可直接断言 —— 见 `tests/suites/test_rule_config.gd`。
 func _check_end_condition() -> bool:
-	if time_remaining <= 0.0:
+	return _rule_set_evaluate().should_end
+
+
+## 取当前生效的规则集（每帧一次求值，故**按需重建**而非缓存）。
+##
+## ##⚠ 为什么每次重建（这是规格 §7.1 的直接后果，不是偷懒）
+##   `kill_target` / `match_duration` 是**公开可写字段**，既有测试直接写它们。
+##   若规则集只在初始化时编译一次，改字段就不会改判定 → 当场转红。
+##   重建成本：2 次字典字面量 + 2 次对象构造 ≈ 几十 ns，
+##   相对本方法每帧都要做的 `_max_kills()` 遍历可忽略。
+##   ⚠ 真要省这几次构造也不能改成"缓存 + 字段变更时失效"，因为字段可写性
+##     是既有测试的**契约**；这里保持"读字段即真值来源"这条唯一口径。
+func _active_ruleset() -> MatchRuleset:
+	#自定义规则集（房主配置 / `sync_ruleset` 下发）优先；没有则用内置默认。
+	return _ruleset if _ruleset != null \
+		else MatchRuleset.builtin_default(kill_target, match_duration)
+
+
+## 求值规则集（**唯一**的规则求值入口）。
+##   `_check_end_condition` 与诊断都走这里，保证「判定口径只有一处」（A.6）。
+func _rule_set_evaluate() -> RuleSet.RuleEvaluation:
+	var ruleset := _active_ruleset()
+	var result := ruleset.rule_set.evaluate(_build_snapshot())
+	# ⛔ 不可用条件 → **不结束对局** + 一次 push_warning（规格 §8.4）
+	#   「配了 5 个条件只跑通 1 个」若表现成「另外 4 个没达成」，
+	#   排查成本极高（形态同 C-18「比分永远 0」：日志全正常、只有规则没生效）。
+	#   一局只警告一次（`_ruleset_warned`），不刷屏。
+	if result.should_end == false and ruleset.rule_set.blocked_by_unavailable():
+		_warn_unavailable_once(ruleset)
+	return result
+
+
+## 构造求值快照（**纯数据、不含节点引用**，规格 §3.2）。
+##   ⚠ 字段来源必须是本对象的**权威**状态：远端玩家的血量真值在受害端（C-18），
+##     但比分真值在权威端，这里读的是权威端自己维护的 `scores`。
+func _build_snapshot() -> Dictionary:
+	return {
+		"scores": scores,
+		"time_remaining": time_remaining,
+		"match_state": match_state,
+		"elapsed": maxf(match_duration - time_remaining, 0.0),
+	}
+
+
+## 本局是否已就「不可用条件」警告过（保证一次/局，不刷屏）。
+var _ruleset_warned := false
+
+
+## 「不可用条件」的一次性告警（规格 §8.4）。
+func _warn_unavailable_once(ruleset: MatchRuleset) -> void:
+	if _ruleset_warned:
+		return
+	_ruleset_warned = true
+	push_warning("ScoreManager: 本局规则集含**不可用**条件（%s）→ 判定不可信，"
+		% str(ruleset.rule_set.last_unavailable_types())
+		+ "按规格 §8.4 **不结束对局**。请改用 kill_target / time_limit，"
+		+ "或先在项目里实现该条件类型的支撑系统。")
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  D2-04 规则配置化 · 对外接口
+# ══════════════════════════════════════════════════════════════════════
+
+## 本局生效的击杀目标（**HUD「先到 N 杀」文案的唯一真值来源**，规格 §1.2.1/ M4）。
+##   房主配 3 杀 → 这里返回 3 → 比分板显示「先到 3 杀」。
+##   ⚠ 之前 `scoreboard.gd` 有一处 `const KILL_TARGET := 15` 硬编码，
+##     那是**第二处**硬编码耦合（`is_near_target` 的默认参数 15 作为兜底保留）。
+func effective_kill_target() -> int:
+	return _active_ruleset().effective_kill_target(kill_target)
+
+
+## 本局生效的规则集（诊断 / 工具页 / 测试）。
+func active_ruleset() -> MatchRuleset:
+	return _active_ruleset()
+
+
+## 权威端设置本局规则集（未来的房主配置面板入口；本期 UI 不做，规格 §9 Q4）。
+##   ⚠ 配置非法时**回落内置默认并 `push_warning`**（规格 §3.3），不静默接受半份配置。
+##   ⚠ 只允许权威端设置 —— 客户端改规则等于自己定胜负（规格 §6.2 同款公平性）。
+##   `cfg == null` → 恢复内置默认（清空自定义规则集）。
+func set_ruleset(cfg: Dictionary) -> bool:
+	if not is_authority():
+		push_warning("ScoreManager: 非权威端不得设置规则集（客户端改规则= 自己定胜负）")
+		return false
+	_ruleset_warned = false
+	if cfg == null:
+		_ruleset = null
+		_ruleset_id_synced = ""
 		return true
-	return _max_kills() >= kill_target
+	var loaded := MatchRuleset.load_ruleset(cfg, kill_target, match_duration)
+	_ruleset = loaded
+	_ruleset_id_synced = loaded.ruleset_id()
+	ruleset_applied.emit(_ruleset_id_synced)
+	if not loaded.load_errors.is_empty():
+		# load_ruleset 已 push_warning；这里不再重复刷屏，只把回落后的 id 记下来。
+		return false
+	# 下发给全端（COUNTDOWN 之前，属性要在**入树前**应用完，规格 §6.3）
+	net_sync_ruleset.rpc(loaded.to_dict(), loaded.ruleset_id())
+	return true
+
+
+## A.4 `sync_ruleset` 核心逻辑（纯逻辑，headless 可直接调）。
+##   客户端收到房主下发的配置 → 应用到本地（**只用于显示**，不参与判定）。
+##   ⚠ `ruleset_id` 不一致要 `push_warning`（规格 §7.4 第 2 条：配置跨端一致是前提）。
+##   ⚠ 校验失败 → 回落内置默认，但仍**以本地收到的为准**（反正客户端不判定）。
+func _apply_ruleset(remote_config: Dictionary, remote_ruleset_id: String) -> void:
+	if remote_ruleset_id.strip_edges() != "" and _ruleset_id_synced != "" \
+			and remote_ruleset_id != _ruleset_id_synced:
+		push_warning("ScoreManager: 收到的规则集 id「%s」与本地已同步的「%s」不一致"
+			% [remote_ruleset_id, _ruleset_id_synced])
+	_ruleset_warned = false
+	var loaded := MatchRuleset.load_ruleset(remote_config, kill_target, match_duration)
+	_ruleset = loaded
+	_ruleset_id_synced = remote_ruleset_id if remote_ruleset_id.strip_edges() != "" \
+		else loaded.ruleset_id()
+	ruleset_applied.emit(_ruleset_id_synced)
+
+
+## A.4 规则集下发：**房主 → 全端**。
+##   ⚠ 时机：`start_match()` 里随`sync_match_state` 一同下发，**COUNTDOWN 之前**
+##     —— 因为 `max_health` 等属性必须在玩家**入树前**应用完（规格 §6.3），
+##     而玩家节点在 `main.gd::_ready()` 就已建好。
+##   ⚠ 契约：这是 A.4 的**纯增量**新增条目，既有 5 条 RPC 的方向/模式/载荷**一律未改**，
+##     A.5 全部信号签名亦未动（与 A.5 已有裁定先例一致）。
+@rpc("authority", "call_remote", "reliable")
+func net_sync_ruleset(remote_config: Dictionary, remote_ruleset_id: String) -> void:
+	if is_authority():
+		return # 权威端不接受覆盖（防自发自收/ 防客户端伪造）
+	_apply_ruleset(remote_config, remote_ruleset_id)
 
 
 ## A.6 结束对局：固化 winner_id、冻结 scores、置 ENDED、广播 match_ended + net_match_ended。
@@ -274,6 +446,11 @@ func start_match() -> void:
 		return # 已在倒计时 / 对局中 / 已结束：幂等忽略
 	_countdown_remaining = COUNTDOWN_SECONDS
 	_set_state(MatchState.COUNTDOWN)
+	# D2-04：规则集**必须在 COUNTDOWN 之前**下发（规格 §6.3）——
+	#   玩家属性要在**入树前**应用完，而玩家节点在场景 `_ready()` 阶段就建好了。
+	#   → 每局开头重置「不可用条件」的一次性告警计数。
+	_ruleset_warned = false
+	net_sync_ruleset.rpc(_active_ruleset().to_dict(), _active_ruleset().ruleset_id())
 	_set_players_input_blocked(true) # A.2：COUNTDOWN 期间冻结输入
 
 
@@ -411,6 +588,7 @@ func _apply_reset() -> void:
 	time_remaining = match_duration
 	_countdown_remaining = COUNTDOWN_SECONDS
 	_sync_accum = 0.0
+	_ruleset_warned = false # 新的一局：允许再警告一次「不可用条件」
 	_set_state(MatchState.IDLE)
 	score_changed.emit(scores, time_remaining)
 	match_reset.emit()

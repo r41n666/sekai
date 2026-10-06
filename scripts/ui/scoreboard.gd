@@ -25,7 +25,13 @@ class_name Scoreboard
 ## 本文件**只读** `scores`，绝不自行判定「谁赢了」——否则会出现两套口径打架。
 
 const UI_GROUP := "game_ui"
-## 目标击杀数（显示文案用；真实结束条件在 ScoreManager._check_end_condition）
+## 目标击杀数 —— **兜底默认值，不是真值来源**（D2-04）。
+##⚠ 这曾是「第二处硬编码耦合」（主理人初查遗漏、设计侧勘察发现）：配置成 3 杀时
+##   比分板仍显示「先到 15 杀」→ **目标文案与实际判定不一致**，且不报任何错。
+##   → 真值改读 `ScoreManager.effective_kill_target()`（见 `_refresh_objective`）。
+##   本常量保留有两个用途：① `_effective_kill_target` 的兜底（拿不到ScoreManager 时）
+##   ② `is_near_target()` 的**默认参数 15** —— 既有测试
+##   `test_scoreboard.gd::test_is_near_target_boundary` 依赖该默认值，不得改。
 const KILL_TARGET := 15
 ## 剩余时间 ≤ 该秒数 → 「终局冲刺」（§3.1 临界提示 ②）
 const SPRINT_THRESHOLD := 30.0
@@ -60,6 +66,13 @@ var _time_remaining := 0.0
 var _flash_phase := 0.0
 ## Tab 完整榜是否按住显示（§3.1.1）
 var _full_visible := false
+## D2-04：本局生效的击杀目标（**从 ScoreManager 读真值**，不再用硬编码常量）。
+##   拿不到 ScoreManager 时回落到 `KILL_TARGET`（离线路径 / 早期帧）。
+var _kill_target := KILL_TARGET
+## D2-04：绑定的 ScoreManager 弱引用，**只用于读**（`effective_kill_target()`）。
+##   ⚠ UI 只绑信号、不碰 RPC（A.5 铁律）；这里存节点引用是为了响应
+##     `ruleset_applied` 时能重读真值，**不缓存任何游戏状态**。
+var _score_manager_ref: Node = null
 
 
 func _ready() -> void:
@@ -84,10 +97,34 @@ func set_local_peer_id(id: int) -> void:
 func bind(score_manager: Node) -> void:
 	if score_manager == null or not score_manager.has_signal("score_changed"):
 		return
+	_score_manager_ref = score_manager
 	if not score_manager.score_changed.is_connected(_on_score_changed):
 		score_manager.score_changed.connect(_on_score_changed)
+	# D2-04：开局就把「实际生效的击杀目标」读回来（配置成 3 杀时文案要显示 3）。
+	_pull_effective_kill_target(score_manager)
+	# 规则集到手（含客户端收到 `sync_ruleset` 之后）→ 目标文案按实际值刷新，
+	#   不必等下一次比分变更（≤1 s 心跳）才更新。
+	if score_manager.has_signal("ruleset_applied") \
+			and not score_manager.ruleset_applied.is_connected(_on_ruleset_applied):
+		score_manager.ruleset_applied.connect(_on_ruleset_applied)
 	# 首次绑定立即拉一次当前值（避免开局 1 s 内空白）
 	_on_score_changed(score_manager.scores, score_manager.time_remaining)
+
+
+## D2-04：规则集生效 → 立刻按新的生效目标刷新文案（**只读不改**，UI 不持有游戏状态）。
+func _on_ruleset_applied(_ruleset_id: String) -> void:
+	_pull_effective_kill_target(_score_manager_ref)
+	_refresh_objective()
+
+
+## D2-04：从 ScoreManager 拉取本局生效的击杀目标（规则配置化的真值）。
+##   ⚠ **只读不改**（UI 不持有游戏状态，`control_checklist §0` 的铁律延伸）。
+##   ⚠ 用 `has_method` 判兼容：`effective_kill_target()` 是 D2-04 新增的，
+##     若换回旧版 ScoreManager 节点则静默回落常量，不崩。
+func _pull_effective_kill_target(score_manager: Node) -> void:
+	if score_manager == null or not score_manager.has_method("effective_kill_target"):
+		return
+	_kill_target = maxi(int(score_manager.call("effective_kill_target")), 1)
 
 
 func _on_score_changed(scores: Dictionary, time_remaining: float) -> void:
@@ -162,6 +199,9 @@ static func kd_text(kills: int, deaths: int) -> String:
 
 
 ## 某人是否处于「还差 N 杀」临界（含已达目标的情况返回 false —— 那已经赢了）。
+## ⚠ 默认参数 `KILL_TARGET`（15）是**兜底、不是真值**：D2-04 之后本局目标由
+##   规则配置决定，调用方应显式传入实际生效值（见 `_apply_critical_flashing`）。
+##   默认参数保留是为向后兼容既有测试（`test_is_near_target_boundary` 依赖它）。
 static func is_near_target(kills: int, target: int = KILL_TARGET) -> bool:
 	return kills < target and target - kills <= NEARLY_THRESHOLD
 
@@ -197,7 +237,8 @@ static func full_row_text(rank: int, row: Dictionary) -> String:
 # ══════════════════════════════════════════════════════════════════════
 
 func _refresh_objective() -> void:
-	_objective_label.text = "先到 %d 杀" % KILL_TARGET
+	# D2-04：读**实际生效**的击杀目标（配置化后可能是 3，不是硬编码 15）。
+	_objective_label.text = "先到 %d 杀" % _kill_target
 	_time_label.text = "剩余 %s" % format_clock(_time_remaining)
 	var sprinting := _time_remaining > 0.0 and _time_remaining <= SPRINT_THRESHOLD
 	# 明度差异为主（§6），不只换色
@@ -266,7 +307,7 @@ func _apply_critical_flashing() -> void:
 		var label := _rows_box.get_child(i) as Label
 		if label == null:
 			continue
-		var near := i < rows.size() and is_near_target(int(rows[i].get("kills", 0)))
+		var near := i < rows.size() and is_near_target(int(rows[i].get("kills", 0)), _kill_target)
 		label.modulate = (Color(1, 1, 1, 1) if on else Color(0.62, 0.68, 0.74, 1)) if near \
 			else Color(1, 1, 1, 1)
 

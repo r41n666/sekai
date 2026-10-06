@@ -280,6 +280,19 @@ IDLE ──(对局加载完成)──▶ COUNTDOWN(3s) ──▶ LIVE ──(胜
 | `match_ended` | 房主 → 全端 | `authority` / `reliable` | `winner_id: int, final_scores: Dictionary` | 触发结算面板 |
 | `match_reset` | 房主 → 全端 | `authority` / `reliable` | — | 「再来一局」复位 |
 | `sync_match_state` ✅**已定稿（设计裁定）** | 房主 → 全端 | `authority` / `reliable` | `state: int, countdown_remaining: float` | **来源**：工程实现反馈（EP-3 / ES-3.3~3.4，commit `8b0e479`），设计侧于本轮回填裁定。**用途**：客户端精确跟随房主 `match_state`（含 `countdown_remaining`），用于 ① COUNTDOWN 期间显示 3-2-1；② 在 COUNTDOWN 期间冻结输入（`set_input_blocked(true)`）。**触发时机**：状态迁移时（`IDLE→COUNTDOWN`、`COUNTDOWN→LIVE`、`LIVE→ENDED`）+ COUNTDOWN 期间每 1 s 心跳（与 `sync_scores` 心跳同频）。**必要性**：本条是 `04_ux_flow.md §4 规则 3` / `EP-4 ES-4.4`「加载倒计时 + 冻结输入」的**唯一触发信息来源**——缺它则客户端无法得知 COUNTDOWN 何时开始，ES-4.4 不可实现。**权威**：房主状态机是唯一真源，客户端**不得**本地推断（见 A.9.1 已作废的临时近似解）。 |
+| `sync_ruleset` 🆕**已定稿（D2-04 · 增量）** | 房主 → 全端 | `authority` / `reliable` | `ruleset: Dictionary, ruleset_id: String` | **来源**：`05_rule_config_spec.md`（规则配置化）。**用途**：把本局的胜负规则配置（条件类型 / 阈值 / 组合）下发到各端，使 ① HUD 目标文案（`scoreboard.gd` 的「先到 N 杀」不再硬编码 `KILL_TARGET`）与 ② 玩家属性（`max_health` 等，见 `05` §6.4 冲突 1）**两端一致**。**触发时机**：COUNTDOWN 开始前（即 `start_match()` 时，随 `sync_match_state` 一同下发）——必须早于对局开始，因为属性需在**玩家入树前**应用（`05` §6.3）。**权威**：判定只在房主（`05` §7.4）；客户端拿到配置**只用于显示**，本地**不求值、不判定**。**⚠️ 增量性**：本条是**新增条目**，既有 5 条 RPC 的方向 / 模式 / 载荷**一律未改**，A.5 全部信号签名亦未动 —— 与 A.5 已有裁定先例一致（「新增独立信号 = 纯增量、零外溢」）。 |
+
+> **⚠️ A.4 增补记录（2026-10-06 · D2-04 · 文策渊）**：新增 `sync_ruleset` 一条，**理由**是规则与属性配置化后，客户端若不知道本局阈值就会显示错的目标文案（现为 `scoreboard.gd:29` 硬编码 `KILL_TARGET := 15`），且 `max_health` 若两端不一致会撞上 ADR-008 的血量显示守卫（详见 `05_rule_config_spec.md §6.4` 冲突 1）。**影响范围**：新增 1 条 RPC；`ScoreManager` 增1 个 `_apply_ruleset()` 纯逻辑入口（与既有 `_apply_*` 分离口径一致）；**既有 RPC 与信号零改动**，EP-4 的 HUD 绑定面不受影响。
+
+> **✅ A.4 实现落地回填（2026-10-06 · D2-04 · 程基岩 / engineering-lead）**：
+> `sync_ruleset` **已实现并经双端窗口实测通过**（Vulkan / port 7803，房主配 3 杀 → 两端比分板均显示「先到 3 杀」、打完 3 杀两端均结算）。
+> 实现与上文规格的**两处偏差（均为规格未覆盖的实现必需项，已在 `ADR-009` 记录）**：
+> 1. **RPC 方法名为 `net_sync_ruleset`**（非 `sync_ruleset`）—— 遵循本文件既有的 **RPC 加 `net_` 前缀**命名块（`net_match_ended` / `net_match_reset`）以避免与 signal 同名混淆；契约名不变。
+> 2. **A.5 新增一条 `ruleset_applied(ruleset_id: String)` 信号** —— **纯增量**，既有 5 条信号签名**一字未改**。
+>    **必要性**：客户端的玩家节点在 `main.gd::_ready()` 阶段就已建好，而 `sync_ruleset` 是 COUNTDOWN 之前才到的，
+>    **客户端根本没有机会在「入树前」应用属性** → 需由 `main.gd` 据此信号对**已存在**的玩家节点补应用一次。
+>    若不补：客户端 `max_health` 停在场景默认值 100，房主配 200 时客户端会**永久丢弃**血量广播（ADR-008 守卫）→ **血条永远不动且不报错**。
+> 详见 `docs/architecture/adr/ADR-009-rule-config.md`；守护用例 `tests/suites/test_rule_config.gd`。
 
 ## A.5 信号（供 HUD / UI 绑定）
 
@@ -301,9 +314,35 @@ IDLE ──(对局加载完成)──▶ COUNTDOWN(3s) ──▶ LIVE ──(胜
 > **本段由 team-lead 裁定并落盘；design-strategist 所提「信号是本地通知总线、UI 只绑信号不绑 RPC」的洞察已保留为上节引言。**
 
 ## A.6 结算触发与判定
-- `LIVE` 每帧检查：`max(kills) >= kill_target` **或** `time_remaining <= 0` → 房主 `_end_match()`。
+
+> **⚠️ 表述更新（2026-10-06 · D2-04 · 文策渊）**：本条从「**写死一条规则**」改为「**默认规则集的判定结果**」。
+> **改动理由**：用户要求把胜负判定与玩家属性从写死改为可配置、可自由组合（见 `05_rule_config_spec.md`）。
+> **⚠️ 契约未变的部分（对下游仍是同一承诺）**：
+> - `winner_id` 语义 `-1`=未定 / `-2`=并列**不变**（A.3）；
+> - `match_ended(winner_id, final_scores)` **信号签名不变**（A.5）；`ScoreManager` 仍是**唯一判定口径**；
+> - `_evaluate_winner()` 的排序逻辑（kills → deaths → 并列）**一字不改**；
+> - **默认行为等价**：内置默认规则集 `ffa_kill15` 的判定结果 ≡ 本条原先描述的规则（见下"等价性对照"）。
+> **影响范围**：仅 `scripts/game/score_manager.gd` 内部 `_check_end_condition()` 的**实现**（签名不变）；
+> `hud.gd` / `scoreboard.gd` / `match_result.gd` **零改动**（唯一例外：`scoreboard.gd:29KILL_TARGET` 的目标文案需改读实际生效值，见 `05` §7.2 M4）。
+
+- **默认规则集 `ffa_kill15`**（`combine = ANY_OF`）：
+  - `kill_target`：`max(kills) >= kill_target`（默认 `15`）
+  - `time_limit`：`time_remaining <= 0`（默认 `300.0` 秒）
+  - 任一成立 → 房主 `_end_match()`。
 - **胜者**：`kills` 最高者；平局 → `deaths` 少者；仍平 → `winner_id = -2`（并列，UI 显示「平局」）。
 - 结算终态：`winner_id` 固化、`scores` 冻结。
+- **可配置化后**（`05_rule_config_spec.md`）：条件类型可换、可多条件组合（`ALL_OF`/`ANY_OF`）、阈值可自定义；
+  ⚠️ **但 `kill_target` 与 `match_duration` 仍是默认规则集阈值的唯一真值来源**（既有测试直接写这两个字段），
+  且**回合 / 道具 / Boss / 队伍类条件本期不实现**（缺支撑系统，见 `05` §8.2）。
+
+**等价性对照（默认配置必须与旧写死逻辑逐位一致）**：
+
+| 场景 | 旧写死逻辑 | 默认规则集 `ffa_kill15` | 一致 |
+| --- | --- | --- | --- |
+| `time_remaining <= 0` | `true` | `ANY_OF` 含 `time_limit` 成立 → `true` | ✅ |
+| `max(kills) >= kill_target` | `true` | `ANY_OF` 含 `kill_target` 成立 → `true` | ✅ |
+| 两者皆不成立 | `false` | `ANY_OF` 全不成立 → `false` | ✅ |
+| 胜者 / 并列 / 未定 | `_evaluate_winner()` | `winner_policy = MAX_KILLS` → **同一函数** | ✅ |
 
 ## A.7 击杀归因路径（接缝关键）
 - 击杀发生在本端：`weapon.gd::_deal_damage()` / `knife.gd::_slash()` **已在致命时算出 `killed: bool`**。
