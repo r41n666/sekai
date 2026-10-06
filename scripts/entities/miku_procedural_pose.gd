@@ -16,6 +16,11 @@ extends RefCounted
 ##   - 起伏/前倾：取「大腿根」与「上臂」的共同祖先（骨盆/腰），这样动作不会把身体撕开；
 ##   - 名字里带 collider / dummy / hair / skirt / end 等辅助骨骼会被跳过。
 ## 找不到关键骨骼时 valid=false，模型保持原姿态。
+##
+## 战斗动作（开火 / 受击 / 死亡 / 换弹）在步态**之上**叠加：
+##   - 状态机、alpha 包络、叠加量换算全部在 `MikuCombatAnim`（纯逻辑，可 headless 逐值断言）；
+##   - 本类只负责「把叠加量变成骨骼旋转」，并处理死亡对整个身体的接管。
+## valid=false 时所有战斗动作**静默跳过**（不报错、不崩）。
 
 const WALK_LEG_DEG := 28.0      # 大腿摆幅（走）
 const RUN_LEG_DEG := 40.0       # 大腿摆幅（跑）
@@ -77,6 +82,8 @@ var _arm_l := -1
 var _elbow_r := -1
 var _elbow_l := -1
 var _center := -1
+## 头骨（受击时「头微微后」用）。找不到时为 -1，该子动作静默跳过。
+var _head := -1
 ## 上臂「放下」的旋转方向：取决于这条胳膊在骨架的哪一侧
 ## （正常模型右臂在 -X 侧；PMX 转出来的模型左右镜像，右臂在 +X 侧，符号要反过来）
 var _down_sign_r := 1.0
@@ -95,6 +102,10 @@ var _lean := 0.0
 var _bob := 0.0
 var _bob_offset := Vector3.ZERO
 var frequency := 1.2         # 当前步频（Hz，测试/调试可读）
+
+## 战斗动作状态机（开火 / 受击 / 死亡 / 换弹）。逻辑与包络全在 MikuCombatAnim 里，
+## 本类只在 _apply_pose 里把它的叠加量变成骨骼旋转。
+var combat := MikuCombatAnim.new()
 
 var _controlled: Array[int] = []
 
@@ -141,6 +152,7 @@ func setup(skeleton: Skeleton3D, reference: Node3D) -> bool:
 	_elbow_r = _find_by_names(["右ひじ", "右肘"], NAME_EXCLUDE_LIMB)
 	_elbow_l = _find_by_names(["左ひじ", "左肘"], NAME_EXCLUDE_LIMB)
 	_center = _find_by_names(["腰", "センター", "下半身"], [])
+	_head = _find_by_names(["頭", "首", "head"], NAME_EXCLUDE_LIMB)
 
 	# 2) 名字对不上（例如 miku.glb 的骨骼名是乱码）再回退到启发式
 	if _thigh_r < 0:
@@ -171,6 +183,10 @@ func setup(skeleton: Skeleton3D, reference: Node3D) -> bool:
 		_center = _find_common_ancestor(_thigh_r, _thigh_l)
 	if _center < 0:
 		_center = _thigh_r
+	# 头骨：名字对不上就从「身体中心」沿父链往上走，取第一个明显高于中心的骨骼。
+	# 找不到时 _head 保持 -1 → 受击的「头微微后」静默跳过（不报错）。
+	if _head < 0:
+		_head = _find_head(positions)
 	if _thigh_r >= 0:
 		var toe := _child_chain(_thigh_r, 2)
 		if toe >= 0:
@@ -184,7 +200,7 @@ func setup(skeleton: Skeleton3D, reference: Node3D) -> bool:
 	_down_sign_r = _down_sign(_arm_r)
 	_down_sign_l = _down_sign(_arm_l) if _arm_l >= 0 else -_down_sign_r
 	_controlled = [_thigh_r, _thigh_l, _knee_r, _knee_l, _ankle_r, _ankle_l,
-		_arm_r, _arm_l, _elbow_r, _elbow_l, _center]
+		_arm_r, _arm_l, _elbow_r, _elbow_l, _center, _head]
 	debug_names = {
 		"thigh_r": _name_of(_thigh_r), "thigh_l": _name_of(_thigh_l),
 		"knee_r": _name_of(_knee_r), "ankle_r": _name_of(_ankle_r),
@@ -201,15 +217,22 @@ func setup(skeleton: Skeleton3D, reference: Node3D) -> bool:
 
 ## 每帧由 MikuModel.update_animation 调用；speed_mps 用于把步频配到实际速度（防滑步）
 func update(delta: float, speed_mps: float, moving: bool, running: bool, on_floor: bool) -> void:
+	# 战斗动作计时无条件推进（死亡后也要继续走完倒地过渡）。
+	# ⚠ valid=false 时**不碰骨骼**：找不到关键骨骼的模型保持原姿态，动作静默跳过。
+	combat.advance(delta)
 	if not valid:
 		return
+	# 死亡接管：步态目标全部归零（`_apply_pose` 里再叠加倒地旋转），不恢复直到 reset_pose()。
+	var dead := combat.is_dead()
 	var leg_target := 0.0
 	var knee_target := 0.0
 	var arm_target := 0.0
 	var down_target := ARM_DOWN_DEG
 	var lean_target := 0.0
-	var frequency_target := 1.2
-	if not on_floor:
+	var frequency_target := 0.0 if dead else 1.2
+	if dead:
+		pass # 保持上面的全零目标：倒地时腿不再交替迈步
+	elif not on_floor:
 		down_target = JUMP_ARM_DOWN_DEG
 		leg_target = deg_to_rad(JUMP_LEG_DEG)
 		knee_target = deg_to_rad(JUMP_KNEE_DEG)
@@ -238,6 +261,7 @@ func update(delta: float, speed_mps: float, moving: bool, running: bool, on_floo
 	_hold_elbow = lerpf(_hold_elbow, hold_elbow_target, k)
 	_lean = lerpf(_lean, lean_target, k)
 	frequency = lerpf(frequency, frequency_target, k)
+	# 死亡后步频归零 → _phase 不再前进，倒地姿态不会还在原地迈步
 	_phase = fmod(_phase + delta * TAU * frequency, TAU)
 	_apply_pose()
 
@@ -262,20 +286,101 @@ func _apply_pose() -> void:
 	_bob_offset = _up * _bob
 	var down := deg_to_rad(_arm_down)
 	var swing_scale := HOLD_SWING_SCALE if holding_weapon else 1.0
-	var arm_swing_r := -_arm_swing * swing_scale * cos(theta_r) + _hold_forward
-	var arm_swing_l := -_arm_swing * cos(theta_l)
 	var elbow := deg_to_rad(ELBOW_BEND_DEG)
 
 	# 注意：覆写是「绝对」的，父子链必须手工累积（每级绕自己的关节枢轴旋转），
 	# 否则大腿转动不会带动膝盖 / 脚，身体会被钉在 rest 位置。
-	var base := _pivot(_center, Basis(_right, -_lean))
-	base = Transform3D(base.basis, base.origin + _bob_offset)
+	# 战斗动作叠加量（弧度 / 骨架空间单位）：在步态之上**相加**，
+	# 所以 alpha 从 1 衰减到 0 的过程是「动作渐渐融回步态」，不会硬切抽搐。
+	var off := _combat_offsets()
+	# 俯仰：步态前倾是 -_lean（绕right 轴），战斗通道 pitch 正 = 后仰，两者相加。
+	var lean_total := -_lean + float(off[MikuCombatAnim.CH_PITCH])
+	var roll := float(off[MikuCombatAnim.CH_ROLL])
+	var drop := float(off[MikuCombatAnim.CH_DROP])
+	var base := _pivot(_center, Basis(_right, lean_total) * Basis(_front, roll))
+	base = Transform3D(base.basis, base.origin + _bob_offset + _up * drop)
 	_override(_center, base * _skeleton.get_bone_global_rest(_center))
 
-	_pose_leg(_thigh_r, _knee_r, _ankle_r, base, thigh_r, knee_r, ankle_r)
-	_pose_leg(_thigh_l, _knee_l, _ankle_l, base, thigh_l, knee_l, ankle_l)
-	_pose_arm(_arm_r, _elbow_r, base, arm_swing_r, down * _down_sign_r, _hold_elbow)
-	_pose_arm(_arm_l, _elbow_l, base, arm_swing_l, down * _down_sign_l, elbow)
+	_pose_leg(_thigh_r, _knee_r, _ankle_r, base,
+		thigh_r + float(off[MikuCombatAnim.CH_LEG]),
+		knee_r + float(off[MikuCombatAnim.CH_KNEE]),
+		ankle_r)
+	_pose_leg(_thigh_l, _knee_l, _ankle_l, base,
+		thigh_l + float(off[MikuCombatAnim.CH_LEG]),
+		knee_l + float(off[MikuCombatAnim.CH_KNEE]),
+		ankle_l)
+	# 摆臂：正 = 前摆（与 HOLD_ARM_FORWARD_DEG 同向）；down：正 = 更垂（与 ARM_DOWN_DEG 同向）
+	var arm_swing_r := -_arm_swing * swing_scale * cos(theta_r) + _hold_forward \
+		+ float(off[MikuCombatAnim.CH_ARM_R_SWING])
+	var arm_swing_l := -_arm_swing * cos(theta_l) + float(off[MikuCombatAnim.CH_ARM_L_SWING])
+	var arm_down_r := (down + float(off[MikuCombatAnim.CH_ARM_R_DOWN])) * _down_sign_r
+	var arm_down_l := (down + float(off[MikuCombatAnim.CH_ARM_L_DOWN])) * _down_sign_l
+	_pose_arm(_arm_r, _elbow_r, base, arm_swing_r, arm_down_r,
+		_hold_elbow + float(off[MikuCombatAnim.CH_ARM_R_ELBOW]))
+	_pose_arm(_arm_l, _elbow_l, base, arm_swing_l, arm_down_l,
+		elbow + float(off[MikuCombatAnim.CH_ARM_L_ELBOW]))
+	# 头：叠在身体链之上（base 已含俯仰 / 侧倾 / 下沉）。找不到头骨时静默跳过。
+	if _head >= 0:
+		var head_rest := _skeleton.get_bone_global_rest(_head)
+		_override(_head, base * _pivot_at(head_rest.origin,
+			Basis(_right, float(off[MikuCombatAnim.CH_HEAD]))) * head_rest)
+
+
+## 当前所有战斗动作的叠加量之和（死亡 / 开火 / 受击 / 换弹逐个求和）。
+## 同一时刻通常只有一个动作（状态机里后触发者接管），但求和的写法让「叠加」语义显式化，
+## 且包络重叠时不会出现硬切。
+func _combat_offsets() -> Dictionary:
+	var list: Array = []
+	for action in [MikuCombatAnim.Action.FIRE, MikuCombatAnim.Action.HIT,
+			MikuCombatAnim.Action.DEATH, MikuCombatAnim.Action.RELOAD]:
+		var w := combat.overlay_alpha(action)
+		if w > 0.0:
+			list.append(MikuCombatAnim.combat_offsets(action, w))
+	return MikuCombatAnim.sum_offsets(list)
+
+
+## 触发开火（持械臂后坐上抬 + 肘部收回 + 躯干轻微后仰；短促约 0.12 s）。
+## 返回是否被接受（已死亡时返回 false —— 死亡不可逆）。
+## valid=false（没识别出关键骨骼）时静默跳过，返回 false，不报错。
+func trigger_fire() -> bool:
+	if not valid:
+		return false
+	return combat.trigger(MikuCombatAnim.Action.FIRE)
+
+
+## 触发受击（上身小幅后仰 / 侧倾 + 头微微后；短促约 0.18 s，可叠加在行走之上）。
+func trigger_hit() -> bool:
+	if not valid:
+		return false
+	return combat.trigger(MikuCombatAnim.Action.HIT)
+
+
+## 触发死亡（**不可逆**：接管整个身体，倒地后不恢复，直到 reset_pose()）。
+func trigger_death() -> bool:
+	if not valid:
+		return false
+	return combat.trigger(MikuCombatAnim.Action.DEATH)
+
+
+## 触发换弹（左手离开护木去摸弹匣 + 右臂下压；中等时长约 1.2 s，期间移动速度受影响）。
+func trigger_reload() -> bool:
+	if not valid:
+		return false
+	return combat.trigger(MikuCombatAnim.Action.RELOAD)
+
+
+## 复位姿态（重生时调用）：清掉战斗动作状态与死亡不可逆标记。
+func reset_pose() -> void:
+	combat.reset()
+	if valid and _skeleton != null:
+		for idx in _controlled:
+			if idx >= 0:
+				_skeleton.set_bone_global_pose_override(idx, Transform3D(), 0.0, false)
+
+
+## 当前动作对移动速度的影响系数（1 = 不影响；换弹 <1；死亡 = 0）。
+func movement_scale() -> float:
+	return combat.movement_scale()
 
 
 ## 腿链：大腿 → 膝盖 → 脚踝逐级累积（脚踝以下由引擎自然跟随）
@@ -454,6 +559,31 @@ func _find_arm(positions: Array[Vector3], side: int) -> int:
 		arm = parent
 		current = parent
 	return arm
+
+
+## 头骨（启发式）：从身体中心沿**父链**往上走，取第一个「明显高于中心」的骨骼。
+## 用父链而不是全骨架最高点，是为了让头的旋转叠在身体链上（不会把头从身体里拧出来）。
+## 沿途都是辅助骨 / 走完 MAX_CHAIN_STEPS 都没找到 → 返回 -1（该子动作静默跳过）。
+const HEAD_MIN_RATIO := 0.72   # 头的高度比例门槛（相对 min→max 的全高）
+const HEAD_CENTER_MARGIN := 0.04 # 必须比中心骨高出这个比例才算「头」
+
+
+func _find_head(positions: Array[Vector3]) -> int:
+	if _center < 0:
+		return -1
+	var center_h := _height_ratio(positions[_center])
+	var current := _skeleton.get_bone_parent(_center)
+	for step in MAX_CHAIN_STEPS:
+		if current < 0:
+			return -1
+		if _is_helper(current):
+			current = _skeleton.get_bone_parent(current)
+			continue
+		var ratio := _height_ratio(positions[current])
+		if ratio >= HEAD_MIN_RATIO and ratio > center_h + HEAD_CENTER_MARGIN:
+			return current
+		current = _skeleton.get_bone_parent(current)
+	return -1
 
 
 func _is_helper(idx: int) -> bool:

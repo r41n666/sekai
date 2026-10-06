@@ -102,7 +102,8 @@ func _physics_process(delta: float) -> void:
 	var moving := distance > keep_distance
 	var speed := 0.0
 	if moving:
-		speed = run_speed if distance > run_distance else walk_speed
+		# 倒地时combat_movement_scale() 返回 0 → 人机停住（死亡动画不再被移动覆盖）
+		speed = (run_speed if distance > run_distance else walk_speed) * _model.combat_movement_scale()
 		var target := direction * speed
 		var blend := clampf(acceleration * delta, 0.0, 1.0)
 		var horizontal := Vector2(velocity.x, velocity.z).lerp(Vector2(target.x, target.z), blend)
@@ -166,6 +167,7 @@ func _shoot() -> void:
 	_muzzle_light.light_energy = randf_range(2.5, 4.5)
 	_flash_timer = 0.05
 	_gun_audio.play_shot()
+	_model.play_fire() # 与枪声同帧开火动作（人机端本地播放，不走 RPC）
 
 
 ## 被玩家武器命中（weapon.gd 通过 duck typing 调用）
@@ -177,7 +179,9 @@ func take_damage(amount: float, _source: Node = null) -> void:
 	_lean = hit_lean
 	_hit_audio.pitch_scale = randf_range(0.9, 1.15)
 	_hit_audio.play()
+	_model.play_hit()
 	if health <= 0.0:
+		_model.play_death()
 		_die()
 
 

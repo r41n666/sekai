@@ -218,6 +218,10 @@ func start_reload() -> void:
 	reload_started.emit(reload_time)
 	_muzzle_light.visible = false
 	_muzzle_flash.visible = false
+	# 换弹动作（约 1.2 s，期间移动速度受影响）——左手离开护木去摸弹匣
+	var model := _character_model()
+	if model != null:
+		model.play_reload()
 
 
 func _update_reload(delta: float) -> void:
@@ -283,6 +287,7 @@ func _fire() -> void:
 	if _shake:
 		_shake.add_trauma(shake_per_shot)
 	_audio.play_shot()
+	_play_character_fire()
 
 	_show_muzzle_flash()
 	var end_point := _hitscan()
@@ -306,6 +311,28 @@ func net_fire_effects(end_point: Vector3) -> void:
 	if _tracer:
 		_draw_tracer(_muzzle.global_position, end_point)
 	_audio.play_shot()
+
+
+## 找到本武器所属角色的 MikuModel（沿父链上溯）。
+## 场景层级固定为 `MikuModel/WeaponMount/Rifle`，但**不写死路径**：
+## 人机的枪挂在人机自己的 MikuModel 下、第一人称时 WeaponMount 只改世界变换不改父子关系，
+## 走父链对两者都成立。找不到（无模型 / 非战斗场景）返回 null，调用方静默跳过。
+func _character_model() -> MikuModel:
+	var node := get_parent()
+	while node != null:
+		if node is MikuModel:
+			return node as MikuModel
+		node = node.get_parent()
+	return null
+
+
+## 通知角色模型播放开火动作（与枪声同帧 → 天然同步锚点）。
+## ⚠ 只驱动**角色上肢**；后坐力位移是RecoilSystem 对**摄像机**做的，这里不重复（§任务 D）。
+## ⚠ **不走 RPC**：动作是纯视觉表现，各端本地自行播放（联机约束见测试套件）。
+func _play_character_fire() -> void:
+	var model := _character_model()
+	if model != null:
+		model.play_fire()
 
 
 func _hitscan() -> Vector3:

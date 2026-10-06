@@ -55,6 +55,11 @@ const IDLE_PROFILES := {
 @export var walk_keys: PackedStringArray = PackedStringArray(["walk", "move"])
 @export var run_keys: PackedStringArray = PackedStringArray(["run", "sprint"])
 @export var jump_keys: PackedStringArray = PackedStringArray(["jump", "fall", "air"])
+## 战斗动作的动画关键字（两条通道都试：有剪辑走剪辑，没有就退回程序化动作，见 play_combat_action）
+@export var fire_keys: PackedStringArray = PackedStringArray(["fire", "shoot", "attack"])
+@export var hit_keys: PackedStringArray = PackedStringArray(["hit", "damage", "flinch"])
+@export var death_keys: PackedStringArray = PackedStringArray(["death", "die", "dead"])
+@export var reload_keys: PackedStringArray = PackedStringArray(["reload", "load"])
 ## 右手骨骼关键字（把武器挂到手上用；「手首」= 手腕，优先于 Twist / 指尖等辅助骨）
 @export var hand_bone_keys: PackedStringArray = PackedStringArray(
 	["hand_r", "righthand", "right_hand", "wrist_r", "hand.r", "右手首", "手首", "右手"]
@@ -99,6 +104,8 @@ var _loaded_model: Node
 var _anim: AnimationPlayer
 var _procedural: MikuProceduralPose
 var _state_clips: Dictionary = {} # idle / walk / run / jump -> 动画名
+## 战斗动作剪辑：fire / hit / death / reload -> 动画名（匹配不到就是空串 = 走程序化动作）
+var _combat_clips: Dictionary = {}
 ## 程序化待机微动作（呼吸 / 重心微移 / 上身摆动），插在 MikuModel 与载入模型之间
 var _idle_motion: MikuIdleMotion
 
@@ -106,6 +113,10 @@ var _idle_motion: MikuIdleMotion
 var view_camera: Node3D
 ## 是否开镜（由 player.gd 的 set_aiming 同步过来，第一人称下把武器收到画面中心）
 var _view_aiming := false
+## 战斗动作剪辑正在播放（此时状态机不切idle / walk，避免动作被立刻打断）
+var _combat_playing := false
+## 战斗动作剪辑剩余时长（秒）；≤0 表示不在播放
+var _combat_clip_left := 0.0
 
 
 func _ready() -> void:
@@ -144,12 +155,27 @@ func set_first_person(on: bool) -> void:
 ## 每帧把武器摆到该在的位置：第一人称贴相机，第三人称贴右手骨骼
 func _process(delta: float) -> void:
 	_update_idle_intensity(delta)
+	_tick_combat_clip(delta)
 	if _weapon_mount == null:
 		return
 	if _first_person:
 		_follow_view_camera()
 	elif _weapon_follow:
 		_follow_hand_bone()
+
+
+## 战斗动作剪辑的倒计时：播完（或动画自身结束）后恢复行走状态机。
+func _tick_combat_clip(delta: float) -> void:
+	if not _combat_playing:
+		return
+	_combat_clip_left -= delta
+	if _combat_clip_left > 0.0:
+		return
+	_combat_playing = false
+	_combat_clip_left = 0.0
+	if _anim != null and current_state != "":
+		# 强制下一帧update_animation 重切行走状态（current_state 已被 playing 分支跳过）
+		current_state = ""
 
 
 ## 待机微动作的强度：站 / 蹲时全开，趴下时收到 0（避免呼吸起伏把趴姿顶起来、和贴地互掐）。
@@ -320,6 +346,9 @@ func update_animation(delta: float, speed_mps: float, speed_ratio: float, moving
 		state = "jump"
 	elif moving:
 		state = "run" if speed_ratio >= run_threshold else "walk"
+	# 战斗动作播放中不切状态（否则开火动画会被立刻切回idle，看起来像没播）
+	if _combat_playing:
+		return
 	if state == current_state:
 		return
 	current_state = state
@@ -329,6 +358,103 @@ func update_animation(delta: float, speed_mps: float, speed_ratio: float, moving
 	if clip == "" or _anim.current_animation == clip:
 		return
 	_anim.play(clip, fade_time)
+
+
+# ---------------------------------------------------------------------------
+# 战斗动作（开火 / 受击 / 死亡 / 换弹）
+# ---------------------------------------------------------------------------
+
+## 开火（与枪声同步；只做角色上肢，后坐力位移由 RecoilSystem 管摄像机）
+func play_fire() -> void:
+	play_combat_action("fire")
+
+
+## 受击（可叠加在行走步态之上）
+func play_hit() -> void:
+	play_combat_action("hit")
+
+
+## 死亡（程序化通道下**不可逆**，直到 reset_pose()）
+func play_death() -> void:
+	play_combat_action("death")
+
+
+## 换弹（约 1.2 s，期间移动速度受影响）
+func play_reload() -> void:
+	play_combat_action("reload")
+
+
+## 复位姿态（重生时调用）：清掉死亡不可逆标记与骨骼覆写。
+func reset_pose() -> void:
+	if _procedural != null:
+		_procedural.reset_pose()
+	_combat_playing = false
+	_combat_clip_left = 0.0
+
+
+## 触发一个战斗动作。**两条通道都支持**：
+##   ① 有匹配的动画剪辑 → 播剪辑（本项目只有 cat_hatsune_miku 走这条）；
+##   ② 没有剪辑 → **退回程序化动作**（MikuProceduralPose 的 alpha 包络叠加层）。
+## 两条通道互斥：走剪辑通道的模型 _procedural 为 null，走程序化通道的模型没有匹配剪辑，
+## 因此这里「谁有谁上」，不会出现两边同时驱动骨骼。
+func play_combat_action(action: String) -> void:
+	match action:
+		"fire":
+			if not _try_combat_clip(action):
+				_procedural_fire()
+		"hit":
+			if not _try_combat_clip(action):
+				_procedural_hit()
+		"death":
+			if not _try_combat_clip(action):
+				_procedural_death()
+		"reload":
+			if not _try_combat_clip(action):
+				_procedural_reload()
+
+
+## 试着播战斗动作的动画剪辑；没有 / 播不了返回 false（调用方据此退回程序化动作）。
+func _try_combat_clip(action: String) -> bool:
+	if _anim == null:
+		return false
+	var clip: String = _combat_clips.get(action, "")
+	if clip == "":
+		return false
+	if _procedural != null:
+		_procedural.reset_pose() # 死亡是跨通道不可逆的：切到剪辑前先清掉程序化层的死亡标记
+	_anim.play(clip, fade_time)
+	_combat_playing = true
+	_combat_clip_left = _combat_clip_duration(clip)
+	return true
+
+
+## 程序化通道的四个动作（valid=false 时各自静默跳过，不报错）
+func _procedural_fire() -> void:
+	if _procedural != null:
+		_procedural.trigger_fire()
+
+
+func _procedural_hit() -> void:
+	if _procedural != null:
+		_procedural.trigger_hit()
+
+
+func _procedural_death() -> void:
+	if _procedural != null:
+		_procedural.trigger_death()
+
+
+func _procedural_reload() -> void:
+	if _procedural != null:
+		_procedural.trigger_reload()
+
+
+## 战斗动作对移动速度的影响系数（1 = 不影响；换弹 < 1；死亡 = 0）。
+## 由 player.gd / bot.gd 在算移动速度时乘上去（纯视觉表现，不改角色真实速度）。
+func combat_movement_scale() -> float:
+	if _procedural != null:
+		return _procedural.movement_scale()
+	return MikuCombatAnim.new().movement_scale()
 
 
 ## 模型没有「可用的状态动画剪辑」时，退回到「程序化姿态」：把 T-pose 的胳膊放下来 + 走/跑/跳的摆动。
@@ -370,6 +496,9 @@ func _clear_loaded_model() -> void:
 	_anim = null
 	_procedural = null
 	_state_clips.clear()
+	_combat_clips.clear()
+	_combat_playing = false
+	_combat_clip_left = 0.0
 	current_state = ""
 	model_loaded = false
 	_apply_model_visibility()
@@ -440,6 +569,10 @@ func _build_state_clips() -> void:
 	_state_clips["walk"] = _match_clip(names, walk_keys)
 	_state_clips["run"] = _match_clip(names, run_keys)
 	_state_clips["jump"] = _match_clip(names, jump_keys)
+	_combat_clips["fire"] = _match_clip(names, fire_keys)
+	_combat_clips["hit"] = _match_clip(names, hit_keys)
+	_combat_clips["death"] = _match_clip(names, death_keys)
+	_combat_clips["reload"] = _match_clip(names, reload_keys)
 	for state in ["idle", "walk", "run"]:
 		var clip: String = _state_clips.get(state, "")
 		if clip == "":
@@ -448,6 +581,26 @@ func _build_state_clips() -> void:
 		if animation != null:
 			animation.loop_mode = Animation.LOOP_LINEAR
 	_anim.stop() # 模型自带的自动播放交给状态机接管
+
+
+## 战斗动作剪辑的时长（秒）：动画自身的长度；读不到就用动作的标称时长兜底。
+## 兜底值与 MikuCombatAnim 的时长一致 —— 剪辑不存在时本来就是走程序化通道，
+## 这里只是「有剪辑但读不到长度」时的安全下限。
+func _combat_clip_duration(clip: String) -> float:
+	if _anim != null:
+		var animation := _anim.get_animation(clip)
+		if animation != null and animation.length > 0.0:
+			return animation.length
+	match clip:
+		"fire":
+			return MikuCombatAnim.FIRE_DURATION
+		"hit":
+			return MikuCombatAnim.HIT_DURATION
+		"death":
+			return MikuCombatAnim.DEATH_FALL_TIME
+		"reload":
+			return MikuCombatAnim.RELOAD_DURATION
+	return 0.3
 
 
 func _match_clip(names: Array[String], keys: PackedStringArray) -> String:

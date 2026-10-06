@@ -229,6 +229,8 @@ func _physics_process(delta: float) -> void:
 	if _aiming:
 		speed *= aim_speed_scale
 	speed *= STANCE_SPEED_SCALE[_stance]
+	# 换弹 / 倒地时移动变慢（纯表现层的速度系数，不改角色真实速度上限之外的任何逻辑）
+	speed *= _model.combat_movement_scale()
 	var accel := acceleration if is_on_floor() else acceleration * air_control
 	var blend := clampf(accel * delta, 0.0, 1.0)
 	var target := direction * speed
@@ -475,7 +477,14 @@ func take_damage(amount: float, _source: Node = null) -> void:
 	health = maxf(health - amount, 0.0)
 	health_changed.emit(health, max_health)
 	_camera.add_trauma(clampf(amount / maxf(max_health, 1.0) * 1.6, 0.1, 0.8))
+	# 受击 / 死亡动作（纯视觉，各端本地播放，不走 RPC）。
+	# ⚠ 联机口径：**只有受害端会走到这里**（远程伤害走 apply_network_damage，见 C-18），
+	#   所以「谁死了谁自己播倒地」，射手端永远不会替别人播——位置广播会自然同步过去。
+	#   ⛔ 绝不可让射手端按 `_display_health <= 0` 播死亡：那是**显示副本**，不是血量真值
+	#   （control_checklist §4-9 同源纪律）。
+	_model.play_hit()
 	if health <= 0.0:
+		_model.play_death()
 		died.emit()
 		_enter_dead_state()
 
@@ -499,6 +508,8 @@ func respawn() -> void:
 	velocity = Vector3.ZERO
 	_prone = false
 	global_position = spawn_position
+	# 程序化通道的死亡是**不可逆**的（倒地后不恢复），重生必须显式复位
+	_model.reset_pose()
 	set_input_blocked(false)
 	capture_mouse()
 	health_changed.emit(health, max_health)
