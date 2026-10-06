@@ -19,6 +19,8 @@ signal hit_confirmed(target_name: String, killed: bool)
 
 ## HUD 上显示的武器名
 @export var display_name := "武器"
+## 武器槽（Rifle / USP / Knife / Grenade）——武器外观变体按槽查表
+@export var slot := "Rifle"
 
 @export_group("弹药")
 @export var magazine_size := 30
@@ -110,6 +112,7 @@ func set_trigger_enabled(enabled: bool) -> void:
 func set_active(value: bool) -> void:
 	active = value
 	if active:
+		WeaponVariant.play_intro(self, slot) # 掏出时播外观自带动画（蝴蝶刀翻刃）
 		return
 	_trigger_held = false
 	_cancel_aim()
@@ -118,6 +121,11 @@ func set_active(value: bool) -> void:
 ## 套用武器皮肤（Esc 菜单 / player.gd 装备时调用；空 id = 原版）
 func apply_skin(skin_id: String) -> void:
 	WeaponSkin.apply_to(self, skin_id)
+
+
+## 套用武器外观（模型变体；Esc 菜单 / player.gd 装备时调用）
+func apply_variant(variant_id: String) -> void:
+	WeaponVariant.apply_to(self, slot, variant_id)
 
 
 ## 取消开镜（收起武器 / 释放鼠标时调用）

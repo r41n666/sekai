@@ -12,6 +12,13 @@ class_name MikuModel
 @export var model_path := "res://assets/models/miku/miku.glb"
 ## 朝向补正：模型正面朝 -Z 时填 180
 @export var yaw_offset_deg := 0.0
+## 逐模型朝向补正表（度）：某些模型（如 Sketchfab 导出的雕塑）正面朝 -Z，和项目约定（+Z）相反。
+## 键 = 模型文件所在目录名（assets/models/<目录>/<文件>.glb），值 = 需要额外转的偏航角。
+## 在 yaw_offset_deg 之外**再叠一次**；找不到的模型不加补正（= 0）。
+## 判定方法：scripts/entities/model_facing_check.gd（或 tools 里同款离屏实拍：相机放 +Z 正前方，看到脸才对）。
+const MODEL_YAW_CORRECTION := {
+	"miku_statue": 180.0, # Sketchfab 雕塑：正面朝 -Z，实测 +Z 机位看到的是后脑（双马尾在后），补 180
+}
 ## 自动缩放：把模型缩放到这个高度（米，按骨骼/网格范围估算）；设为 0 表示不自动缩放
 @export var auto_fit_height := 1.75
 ## 额外缩放倍率（自动缩放之后再乘一次，用来微调大小）
@@ -157,8 +164,10 @@ func load_model(path: String) -> bool:
 		return false
 	_loaded_model = packed.instantiate()
 	_loaded_model.name = "Miku"
-	if yaw_offset_deg != 0.0 and _loaded_model is Node3D:
-		(_loaded_model as Node3D).rotation.y = deg_to_rad(yaw_offset_deg)
+	# 朝向补正 = 节点上的 yaw_offset_deg + 逐模型表里的补正（某些模型正面朝 -Z）
+	var yaw := yaw_offset_deg + _yaw_correction_for(path)
+	if yaw != 0.0 and _loaded_model is Node3D:
+		(_loaded_model as Node3D).rotation.y = deg_to_rad(yaw)
 	add_child(_loaded_model)
 	_strip_mmd_physics_proxies(_loaded_model)
 	_anim = _find_animation_player(_loaded_model)
@@ -171,6 +180,57 @@ func load_model(path: String) -> bool:
 	# 必须在 model_loaded = true 之后再刷新可见性，否则占位胶囊不会隐藏（会和模型重叠）
 	_apply_model_visibility()
 	return true
+
+
+## 逐模型朝向补正：按 assets/models/<目录>/xxx.glb 的目录名查表（找不到返回 0）
+static func _yaw_correction_for(path: String) -> float:
+	var dir_name := path.get_base_dir().get_file() # res://assets/models/miku_statue/miku_statue.glb -> miku_statue
+	return float(MODEL_YAW_CORRECTION.get(dir_name, 0.0))
+
+
+## 当前姿态下，模型最低点相对「玩家原点」（MikuModel 的父节点原点）的高度差。
+## 返回值 = 最低点 y − 父原点 y / 父缩放；0 = 正好贴地，正 = 悬空，负 = 穿地。
+## 用于趴下时每帧闭环贴地：不用预测（各模型厚度 / 程序化姿态 / 骨骼差异太大），
+## 直接量「现在最低点在哪」，再让 player.gd 把 MikuModel.position.y 推回去。
+## 同帧内不能读 global_transform（父变换未传播），这里手动累乘局部变换链。
+func ground_gap() -> float:
+	if _loaded_model == null or not is_instance_valid(_loaded_model):
+		return 0.0
+	var parent := get_parent() as Node3D
+	if parent == null:
+		return 0.0
+	# MikuModel 自己的变换（含当前旋转 / 位置）作为链的起点
+	var base := parent.global_transform
+	var lo := INF
+	for child in get_children():
+		lo = minf(lo, _lowest_y_under(child, base * transform))
+	if not is_finite(lo):
+		return 0.0
+	# 换算到父节点局部空间（父节点若被缩放，global 与 local 不 1:1；这里按父原点对齐）
+	var parent_origin := parent.global_position.y
+	# 用父节点的 y 缩放，把世界高度差换算成 MikuModel.position.y 上的量
+	var scale_y := parent.global_transform.basis.get_scale().y
+	if is_zero_approx(scale_y):
+		scale_y = 1.0
+	return (lo - parent_origin) / scale_y
+
+
+## 递归累乘局部变换到每个 MeshInstance3D，求其在「flatten 空间」下的最低 y
+func _lowest_y_under(node: Node, parent_xform: Transform3D) -> float:
+	var lo := INF
+	var xform := parent_xform
+	if node is Node3D:
+		xform = parent_xform * (node as Node3D).transform
+	if node is MeshInstance3D:
+		var box: AABB = (node as MeshInstance3D).get_aabb()
+		for c in 8:
+			var corner := box.position + Vector3(
+				box.size.x * (c & 1), box.size.y * ((c >> 1) & 1), box.size.z * ((c >> 2) & 1))
+			lo = minf(lo, (xform * corner).y)
+		return lo
+	for child in node.get_children():
+		lo = minf(lo, _lowest_y_under(child, xform))
+	return lo
 
 
 ## 每帧由 player.gd 调用：有动画剪辑就切动画；没有剪辑时用程序化姿态（摆放骨骼）

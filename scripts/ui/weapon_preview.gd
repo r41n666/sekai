@@ -60,7 +60,7 @@ func _ready() -> void:
 	set_process(false)
 
 
-## 显示指定武器 + 皮肤（皮肤 id 为空 = 原版）
+## 显示指定武器 + 外观（当前槽选中的模型变体）+ 皮肤（皮肤 id 为空 = 原版）
 func show_weapon(slot: String, skin_id: String) -> void:
 	if _weapon != null and is_instance_valid(_weapon):
 		_weapon.queue_free()
@@ -73,10 +73,16 @@ func show_weapon(slot: String, skin_id: String) -> void:
 	_weapon = (load(path) as PackedScene).instantiate() as Node3D
 	_weapon.set_process(false)
 	_weapon.set_physics_process(false)
+	# 先换外观（会顺带重套皮肤），这样检视里看到的就是手上的那把
+	if _weapon.has_method("apply_variant"):
+		_weapon.apply_variant(WeaponVariant.get_selected(slot))
 	if _weapon.has_method("apply_skin"):
 		_weapon.apply_skin(skin_id)
 	_pivot.add_child(_weapon)
-	_frame()
+	WeaponVariant.play_intro(_weapon, slot) # 有开场动画的外观（蝴蝶刀翻刃）在检视里也演一遍
+	await get_tree().process_frame # 等旧模型真正释放后再按包围盒取景
+	if is_instance_valid(_weapon):
+		_frame()
 
 
 ## 菜单打开 / 关闭时开关自转
@@ -91,6 +97,7 @@ func _process(delta: float) -> void:
 
 ## 按包围盒取景：把模型中心挪到原点，相机从右上前方看过去
 func _frame() -> void:
+	_weapon.position = Vector3.ZERO
 	var box := _weapon_aabb()
 	if box.size.length() <= 0.0001:
 		_camera.position = Vector3(0.5, 0.4, 0.7)

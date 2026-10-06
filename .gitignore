@@ -1,3 +1,6 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# 验收截图工具的临时输出目录（挑好的图再手动放进 docs/acceptance/）
+/_accept_tmp/

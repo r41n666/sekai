@@ -20,6 +20,7 @@ rings = 4
 [node name="USP" type="Node3D"]
 script = ExtResource("1_weapon")
 display_name = "USP · 半自动"
+slot = "USP"
 magazine_size = 12
 reserve_ammo = 24
 reload_time = 2.2

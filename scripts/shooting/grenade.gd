@@ -6,6 +6,8 @@ class_name Grenade
 signal ammo_changed(count: int, reserve: int)
 
 @export var display_name := "手雷"
+## 武器槽（武器外观变体按槽查表）
+@export var slot := "Grenade"
 @export var start_count := 3
 @export var throw_speed := 9.0
 @export var throw_up := 3.0
@@ -41,11 +43,18 @@ func set_trigger_enabled(_enabled: bool) -> void:
 
 func set_active(value: bool) -> void:
 	active = value
+	if active:
+		WeaponVariant.play_intro(self, slot) # 外观自带的开场动画（目前只有蝴蝶刀有）
 
 
 ## 套用武器皮肤（Esc 菜单 / player.gd 装备时调用；空 id = 原版）
 func apply_skin(skin_id: String) -> void:
 	WeaponSkin.apply_to(self, skin_id)
+
+
+## 套用武器外观（模型变体；Esc 菜单 / player.gd 装备时调用）
+func apply_variant(variant_id: String) -> void:
+	WeaponVariant.apply_to(self, slot, variant_id)
 
 
 ## 供 HUD 显示（鸭子类型，和枪一致）

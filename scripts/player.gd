@@ -244,10 +244,19 @@ func _update_stance(delta: float) -> void:
 		capsule.height = lerpf(capsule.height, STANCE_HEIGHTS[_stance], k)
 		_collision.position.y = capsule.height * 0.5
 	_camera_pivot.position.y = lerpf(_camera_pivot.position.y, STANCE_CAMERA_Y[_stance], k)
-	var target_tilt := -1.45 if _stance == 2 else 0.0
-	var target_y := 0.25 if _stance == 2 else 0.9
+	# 趴下：绕 X 轴 +90° 把模型「向前压平」——
+	#   模型正面 +Z 转到 -Y（脸朝下 ✓），头顶转到 +Z（头朝前 ✓）= 向前趴下、正面朝下。
+	#   之前是 -1.45（≈ -83°），会把正面转到 +Y、头转到 -Z（仰面朝天、头朝后），方向整个反了。
+	var target_tilt := PI * 0.5 if _stance == 2 else 0.0
 	_model.rotation.x = lerpf(_model.rotation.x, target_tilt, k)
-	_model.position.y = lerpf(_model.position.y, target_y, k)
+	if _stance == 2:
+		# 贴地：各模型厚度 / 程序化姿态 / 骨骼差异太大，写死常数会悬空或穿地。
+		# 闭环修正——量出「当前模型最低点相对玩家原点的高度差」，直接把 MikuModel 推回去。
+		# （gap 本身就是绝对量：本帧量出来是多少就修正多少，一步到位、不会来回抖。）
+		_model.position.y -= _model.ground_gap()
+		_model.position.y = clampf(_model.position.y, 0.05, 2.2)
+	else:
+		_model.position.y = lerpf(_model.position.y, 0.9, k)
 
 
 ## 自由视角（Alt）：松开后自动回正
@@ -414,8 +423,10 @@ func _equip_slot(slot: String) -> void:
 	_current_slot = "" if next == null else slot
 	if next != null:
 		(next as Node3D).visible = true
+		if is_multiplayer_authority() and next.has_method("apply_variant"):
+			next.apply_variant(WeaponVariant.get_selected(slot)) # 用 Esc 菜单里选的模型外观（会重套皮肤）
 		if next.has_method("set_active"):
-			next.set_active(true)
+			next.set_active(true) # 掏出时才播「翻刃」这类开场动画，所以要放在换外观之后
 		if next.has_method("apply_skin") and is_multiplayer_authority():
 			next.apply_skin(WeaponSkin.get_selected(slot)) # 用 Esc 菜单里选的皮肤
 		if is_multiplayer_authority():
@@ -431,6 +442,14 @@ func set_weapon_skin(slot: String, skin_id: String) -> void:
 	var weapon: Node = _weapons.get(slot)
 	if weapon != null and weapon.has_method("apply_skin"):
 		weapon.apply_skin(skin_id)
+
+
+## 由 Esc 菜单调用：切换某个武器槽的模型外观并立即生效（只影响本端）
+func set_weapon_variant(slot: String, variant_id: String) -> void:
+	WeaponVariant.set_selected(slot, variant_id)
+	var weapon: Node = _weapons.get(slot)
+	if weapon != null and weapon.has_method("apply_variant"):
+		weapon.apply_variant(variant_id)
 
 
 func capture_mouse() -> void:
