@@ -146,6 +146,15 @@ view_toggle={
 
 [rendering]
 
-rendering_device/driver.windows="d3d12"
+; ⚠ 固定 Vulkan，**不要**改回 d3d12（2026-10-06 实测，见 docs/architecture/control_checklist.md §4-10）。
+;   D3D12 后端在本机AMD RX 6750 GRE 上初始化纹理必失败：
+;     ERROR: CreateResource failed with error 0x80070057.        （= E_INVALIDARG）
+;     at: texture_create (drivers/d3d12/rendering_device_driver_d3d12.cpp:1404)
+;     → "!texture.driver_id" → "uninitialized RID" → "tex is null"（texture_set_size_override）
+;   随后渲染器拿空 RID 继续走 → 进程崩掉（编辑器里表现为 "Debugging process stopped"）。
+;   这是 Godot D3D12 后端缺陷，非本项目代码问题（同款错误级联见 godot#117115，
+;   报告者同为 AMD 显卡，明确「仅 D3D12 复现、Vulkan 正常」）。
+;   本机实测对照：D3D12 = 9 条错误；Vulkan = 0 条、exit 0。
+rendering_device/driver.windows="vulkan"
 textures/default_filters/anisotropic_filtering_level=3
 anti_aliasing/quality/use_taa=true

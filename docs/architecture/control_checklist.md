@@ -147,6 +147,24 @@
    守护测试：`tests/suites/test_kill_attribution.gd`。
    ⚠️ 附带一条通用纪律：**新增 suite 必须手动登记到 `tests/framework/test_runner.gd` 的
    `SUITE_SCRIPTS` 数组**（该数组不自动发现文件）——漏登记会静默不跑，让人误以为"测试全绿"。
+10. **⛔ 禁止把 `rendering_device/driver.windows` 改回 `"d3d12"`（`project.godot` 必须保持 `"vulkan"`）。**
+    本条由来（2026-10-06 G4 崩溃）：改回 D3D12 后，游戏启动即崩（编辑器表现为
+    `--- Debugging process stopped ---`），且**崩在计分逻辑之前**（一行 `[MBDBG]` 都没有）。
+    错误级联（首因在 Godot D3D12 后端，非本项目代码）：
+    ```
+    ERROR: CreateResource failed with error 0x80070057.       ← E_INVALIDARG
+       at: texture_create (drivers/d3d12/rendering_device_driver_d3d12.cpp:1404)
+    ERROR: Condition "!texture.driver_id" is true. Returning: RID()
+    ERROR: Attempting to use an uninitialized RID → Parameter "tex" is null.
+    ```
+    渲染器拿到空 RID 后继续走后续纹理操作 → 进程死掉。
+    同款级联见 `godot#117115`（报告者同为 AMD 显卡，明确「仅 D3D12 复现、Vulkan 正常」）。
+    - 本机实测对照（RX 6750GRE）：**D3D12 = 9 条错误；Vulkan = 0 条、exit 0**。
+    - 复现命令（改回d3d12 后应打出 9 条）：`godot --path . --rendering-driver d3d12 --quit-after 120 res://scenes/main.tscn`
+    - 排查纪律：**看到 `0x80070057` / `uninitialized RID` / `texture_set_size_override` 就想到本条**，
+      不要去翻业务代码 —— 这些是渲染后端栈帧，`miku_model.gd` 等业务脚本根本不碰纹理。
+    - 换驱动后必须重跑一次窗口双端G4（headless 自检 `--headless` 不走渲染后端，
+      **因此 verify PASS 并不能证明渲染没问题** —— 这是本条能潜伏至今的原因）。
 
 ---
 
