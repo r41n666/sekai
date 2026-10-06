@@ -231,7 +231,7 @@
 | 重生倒计时 | `death_screen.gd` + `player.gd::respawn()` | 加 3 s 倒计时 | 低 |
 | 加载倒计时 | `network_manager.gd` + `main.gd` + `score_manager.gd` | 新增 3-2-1 冻结；客户端由 `sync_match_state` 获知 | 低（**依赖 `sync_match_state` RPC，见 `01_core_loop.md` 附录 A.4**） |
 | 比分数据 | 见 `01_core_loop.md` 附录 A | 新 `ScoreManager` | 中（RPC 时序） |
-| 敌我分组解耦 | `weapon.gd`/`knife.gd`/`minimap.gd`/`teammate_icons.gd` | 解耦伤害路由与显示分组 | **中（关键回归 AC-F2）** |
+| 敌我分组解耦 | `weapon.gd`/`knife.gd`/`minimap.gd`/`teammate_icons.gd` | 解耦伤害路由与显示分组 | **中（关键回归 AC-F2）** · ✅ 已实现（EP-2 `e5fae14`/`d5104de`） |
 | 小地图边缘箭头 | `minimap.gd::_draw_group()` | 超半径敌人画边缘方向箭头（§3.5 / `03_map AC-3`） | 低 |
 
 > **待 engineering-lead 评估**：① 路由键选型（方法探测 `has_method("apply_network_damage")` vs 中性组）；② 结算面板 [再来一局] 的复位流程（比分/位置/倒计时）；③ 比分板在 4 人名字过长时的截断策略。
