@@ -122,6 +122,17 @@
    （`minimap.gd:20` / `teammate_icons.gd:48`）；FFA 下要把它改成"敌对显示"时，若只改分组会**直接弄坏联机伤害**。
    详见 `adr/ADR-007-group-as-implicit-interface.md`（统一收录 C-16 / AC-F2 / AC-A3b）。
    命令：`rg "is_in_group|get_nodes_in_group|add_to_group" scripts/` —— 先看全，再改。
+8. **改 `main.tscn` 的 `SpawnPoints` 子节点（增/删/重排 `Spawn1~4`）前，必须先核对 `design/gdd/03_map_encounter.md §1.2`。**
+   **`SpawnPoints` 的「子节点次序」就是「出生点分配优先序」**：`main.gd::spawn_index_for()` 用
+   `_spawn_points.get_child(下标)` 取点，而下标来自「房间内排序玩家列表的序号 % 子节点数」。
+   因此**重排 `Spawn1~4` 不会报错、不会崩、也可能跑绿现有几何测试，但会静默改变 2/3 人开局落点**
+   （4 人恒取四角、不受影响；2 人取 idx `0/1`、3 人取 idx `0/1/2`，落点是哪几个角**完全由子节点次序决定**）。
+   规范次序（**不要动**）：`(-32,-32)` → `(32,-32)` → `(32,32)` → `(-32,32)`；
+   由此 2 人 = `(-32,-32)+(32,-32)`（相邻角、共用 `z=-32` 边、64 m，已枚举确认为唯一 64 m 最优对）。
+   检查动作：改 `SpawnPoints` 前后跑 `tests/suites/test_spawn_points.gd`（含 `test_spawn_child_order_is_canonical`
+   与 `test_two_player_spawns_share_an_edge_not_diagonal` 两条守护用例）；
+   任何红线 = 你改动了分配优先序，必须回头核对 §1.2 并同步 `EP-1 ES-1.1`。
+   详见 `tests/suites/test_spawn_points.gd`（守护测试）与 `adr/` 中出生点相关记录。
 
 ---
 
@@ -141,3 +152,4 @@
 | --- | --- | --- |
 | 2026-10-06 | 初版：21 个输入动作 + 3 界面互斥 + 屏蔽矩阵 | 程基岩（E3-01） |
 | 2026-10-06 | §4 增第 7 条：改组归属前先 grep 全部 `is_in_group` 消费点（配 ADR-007） | 程基岩（E4-01 补录） |
+| 2026-10-06 | §4 增第 8 条：改 `SpawnPoints` 子节点次序前核对 §1.2（次序=分配优先序，配 `test_spawn_points.gd` 守护测试） | 程基岩（R1/R2 收口） |
