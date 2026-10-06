@@ -153,9 +153,13 @@ func _refresh_player_hooks() -> void:
 	var container := _find_players_container()
 	if container == null:
 		return
-	# 1) 清理已被 free 的节点
-	for iid in _hooked_players.keys():
-		var node: Object = _hooked_players[iid]
+	# 1) 清理已被 free 的节点。
+	#    ⚠ 必须先取 key 快照再删：在遍历 `keys()` 的同时 `erase()` 会改动底层字典，
+	#    且把「已 free 的实例」从 Dictionary 取出赋给变量时，Godot 会抛
+	#    "Trying to assign invalid previously freed instance"（用户双端实测中已复现）。
+	#    改用 `duplicate()` 快照，并把值取进 Variant 后再判空，即可避免。
+	for iid: Variant in _hooked_players.keys().duplicate():
+		var node: Variant = _hooked_players.get(iid)
 		if node == null or not is_instance_valid(node):
 			_hooked_players.erase(iid)
 	# 2) 补齐新节点
