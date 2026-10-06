@@ -37,6 +37,22 @@ godot --headless --path . --import
 godot --headless --path . --quit-after 300
 ```
 
+### 一键自检（推荐，改动后跑一次）
+
+```bash
+bash tools/verify.sh          # 静默模式：只打印每环节 PASS/FAIL + 最终退出码
+bash tools/verify.sh -v       # 详细模式：追加 --import / 测试的完整原始输出
+```
+
+把「导入资源 → 脚本可解析性校验 → 全量测试」固化成一条命令。**任一环节失败即非零退出**（退出码 `1`；`2` = 找不到 Godot 或缺参数），可直接挂进提交前钩子。
+
+| 环境变量 | 说明 |
+| --- | --- |
+| `GODOT_BIN` | Godot 可执行文件路径。未设置时按顺序探测 `~/Desktop/Godot_*_console.exe` 等常见位置，最后退回 PATH 上的 `godot`。 |
+| `VERIFY_TIMEOUT` | 单步超时秒数（默认 180）。 |
+
+> **为什么脚本不用裸 `--check-only`**：本项目几乎所有关键脚本都引用 Autoload `NetworkManager`，而 `--check-only` **不注册 Autoload**，会把本应通过的脚本误报为 `Identifier not found: NetworkManager`；且 `--check-only <file>` 在本机 4.7.2 上会**挂起不退出**。所以脚本改用 `test_runner.tscn` 做门禁——它以普通场景运行、Autoload 正常注册，会 load+compile 被测脚本，注入语法错误时能明确报 `Failed to load script ... Parse error`，同时充当「可解析性门禁 + 行为门禁」。取舍理由完整写在 `tools/verify.sh` 头部注释里。
+
 ### 操作说明
 
 | 按键 | 功能 |

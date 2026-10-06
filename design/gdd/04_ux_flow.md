@@ -111,8 +111,8 @@
 
 | 项 | 规格 |
 | --- | --- |
-| 触发 | `match_state → COUNTDOWN`（房主状态机）；**客户端唯一信息源 = `01_core_loop.md` 附录 A.4 的 `sync_match_state`**（设计裁定已定稿） |
-| 显示 | 屏幕**中央**大号数字「3 / 2 / 1」覆盖层；本地按 `countdown_remaining` 平滑递减，`sync_match_state` 心跳（1 s）校正 |
+| 触发 | `match_state → COUNTDOWN`（房主状态机）；跨端传输 = `01_core_loop.md` 附录 A.4 的 `sync_match_state`；**UI 绑本端信号 `countdown_updated(remaining)`（附录 A.5），不直接绑 RPC** |
+| 显示 | 屏幕**中央**大号数字「3 / 2 / 1」覆盖层；由信号 `countdown_updated(remaining)` 取值、本地平滑递减，`sync_match_state` 心跳（1 s）校正 |
 | 输入 | COUNTDOWN 全程 `set_input_blocked(true)`；进入 `LIVE` 时 `false` + 重新 `capture_mouse()`（见 §4 矩阵） |
 | 目的 | 避免「谁先加载完谁先开枪」——本 UI 与 §4 规则 3 是同一要求的「表现 + 逻辑」两面 |
 | 模态 | **非模态**覆盖层（不进 `game_ui` 互斥组；无按钮） |

@@ -45,8 +45,8 @@
   理由：原 A.4 消息清单无状态迁移消息 → 客户端不知道 COUNTDOWN 何时开始 → 无法冻结输入、无法显示 3-2-1。`sync_match_state` 是**唯一**触发信息来源（设计裁定：客户端不得本地推断）。
   A.9.1 的客户端临时近似解（收 `sync_scores` 推断 `LIVE`）**已作废**；UI 规格见 `04_ux_flow.md §3.4`。
   → **本 Story 与 `sync_match_state` 同批实现**（工程实施随 ES-4.4，见 `EP-3` 变更记录 `8b0e479`）。
-- **验收补充**：客户端收到 `sync_match_state(S_COUNTDOWN, r)` → 进入 COUNTDOWN、显示 3-2-1、`set_input_blocked(true)`；收到 `S_LIVE` → 解冻输入；RPC 丢失由 1 s 心跳兜底。
-- **涉及文件**：`scripts/network/network_manager.gd::_start_match()`、`scripts/main.gd`、`scripts/game/score_manager.gd`（新增状态广播，**与 ES-4.4 同批实现**）。
+- **验收补充**：客户端收到 `sync_match_state(S_COUNTDOWN, r)` → 进入 COUNTDOWN、显示 3-2-1、`set_input_blocked(true)`；收到 `S_LIVE` → 解冻输入；RPC 丢失由 1 s 心跳兜底。**倒计时 UI 绑本端信号 `countdown_updated(remaining)`（`01_core_loop.md` 附录 A.5），不直接绑 RPC**。
+- **涉及文件**：`scripts/network/network_manager.gd::_start_match()`、`scripts/main.gd`、`scripts/game/score_manager.gd`（新增状态广播 + **新增信号 `countdown_updated`**，**与 ES-4.4 同批实现**）。
 - **测试证据**：契约锁——断言 COUNTDOWN 态调用 `set_input_blocked(true)`；断言客户端收到 `sync_match_state` 后进入 COUNTDOWN 并冻结输入；断言 `LIVE` 后解冻。
 
 ## ES-4.5 · FFA 显示一致性 + 可访问性第二线索 · M · ⏳ 待实施

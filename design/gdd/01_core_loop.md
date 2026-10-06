@@ -177,7 +177,7 @@
 | 项 | 规格 |
 | --- | --- |
 | 触发 | `ScoreManager.match_state → COUNTDOWN`；**客户端由 `sync_match_state`（附录 A.4）获知** |
-| 显示 | 屏幕**中央**大号数字「3 / 2 / 1」（覆盖层，不进 `game_ui` 互斥组）；数据源 = `sync_match_state.countdown_remaining`（本地按 1 s 递减平滑，心跳校正） |
+| 显示 | 屏幕**中央**大号数字「3 / 2 / 1」（覆盖层，不进 `game_ui` 互斥组）；数据源 = **本端信号 `countdown_updated(remaining)`（附录 A.5）**，由本地按帧递减平滑，`sync_match_state` 心跳校正 |
 | 输入 | COUNTDOWN 全程 `set_input_blocked(true)`；→ `LIVE` 时 `false` 并 `capture_mouse()`（对齐 `04_ux_flow.md §4` 输入屏蔽矩阵「加载 / 3-2-1 倒计时」行） |
 | 目的 | 避免「谁先加载完谁先开枪」（`04_ux_flow.md §4` 规则 3） |
 | 离线 | 本端即权威，直接本地倒计时，无 RPC |
@@ -281,10 +281,24 @@ IDLE ──(对局加载完成)──▶ COUNTDOWN(3s) ──▶ LIVE ──(胜
 | `match_reset` | 房主 → 全端 | `authority` / `reliable` | — | 「再来一局」复位 |
 | `sync_match_state` ✅**已定稿（设计裁定）** | 房主 → 全端 | `authority` / `reliable` | `state: int, countdown_remaining: float` | **来源**：工程实现反馈（EP-3 / ES-3.3~3.4，commit `8b0e479`），设计侧于本轮回填裁定。**用途**：客户端精确跟随房主 `match_state`（含 `countdown_remaining`），用于 ① COUNTDOWN 期间显示 3-2-1；② 在 COUNTDOWN 期间冻结输入（`set_input_blocked(true)`）。**触发时机**：状态迁移时（`IDLE→COUNTDOWN`、`COUNTDOWN→LIVE`、`LIVE→ENDED`）+ COUNTDOWN 期间每 1 s 心跳（与 `sync_scores` 心跳同频）。**必要性**：本条是 `04_ux_flow.md §4 规则 3` / `EP-4 ES-4.4`「加载倒计时 + 冻结输入」的**唯一触发信息来源**——缺它则客户端无法得知 COUNTDOWN 何时开始，ES-4.4 不可实现。**权威**：房主状态机是唯一真源，客户端**不得**本地推断（见 A.9.1 已作废的临时近似解）。 |
 
-## A.5 信号（供 HUD 绑定）
-- `score_changed(scores: Dictionary, time_remaining: float)`
-- `match_state_changed(state: int)`
-- `match_ended(winner_id: int, final_scores: Dictionary)`
+## A.5 信号（供 HUD / UI 绑定）
+
+> **信号是「本地通知总线」，不是「跨端传输」**——房主与客户端**都**在本端 emit，**本地消费**（HUD / 倒计时 UI）。跨端传输走 A.4 的 RPC；RPC 到达后再由 `_apply_*()` 在本端 emit 对应信号。两条通道**不混用**：UI **只绑信号**，**不直接绑 RPC**。
+
+- `score_changed(scores: Dictionary, time_remaining: float)` —— **保持不变**
+- `match_state_changed(state: int)` —— **保持不变**：回答「状态变了没」（稀疏事件，最多 4 次/局）。**不扩签名**。
+- **`countdown_updated(remaining: float)`** ✅**已定稿**（新增）——`remaining` = COUNTDOWN 剩余秒数（3.0 → 0.0），供倒计时 UI（`04_ux_flow.md §3.4`）平滑取值。
+  - **发出点**：`_drive_countdown()` 递减后 emit（权威端逐帧）；**客户端**在 `sync_match_state` 到达后于 `_apply_*()` 中 emit。离开 `COUNTDOWN`（进 `LIVE` / `ENDED` / `IDLE`）后**停止 emit**。
+  - **载荷语义**与 A.4 `sync_match_state` 的 `countdown_remaining` **一致**（同为「剩余秒数」），避免两处口径相反。
+- `match_ended(winner_id: int, final_scores: Dictionary)` —— **保持不变**
+
+> **⚠ 信号形态的裁定记录（team-lead · 游承峰 · 2026-10-06）**
+> 本项曾出现两种方案分歧：**(甲) 扩 `match_state_changed` 签名** vs **(乙) 新增独立 `countdown_updated`**。
+> **最终裁定 = (乙)**，理由：
+> 1. **不破坏既有契约**。A.5 明写「供 HUD 绑定」，签名是**对下游的承诺**；扩签名是破坏性变更（波及 EP-4 全部绑定面 + 既有测试迁移），新增独立信号则**纯增量、零外溢**。
+> 2. **语义与频率分离**。状态迁移是**稀疏**事件（≤4 次/局），倒计时是**高频**事件（逐帧）。塞进同一条信号，会让「状态变了」被高频刷新污染——订阅者每次 tick 都收到一次「状态变化」，与字面语义冲突，且调用方只能靠比对 `state` 值去区分「真迁移」与「倒计时 tick」，等于把语义推给调用方猜。
+> 3. 方案 (甲) 的合理内核（**UI 必须能平滑取值、不能只靠 1 s 心跳的 RPC**）**已被 (乙) 完整满足**——(乙) 同样让 UI 绑本端高频信号。
+> **本段由 team-lead 裁定并落盘；design-strategist 所提「信号是本地通知总线、UI 只绑信号不绑 RPC」的洞察已保留为上节引言。**
 
 ## A.6 结算触发与判定
 - `LIVE` 每帧检查：`max(kills) >= kill_target` **或** `time_remaining <= 0` → 房主 `_end_match()`。

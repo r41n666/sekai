@@ -41,10 +41,11 @@
 - **涉及文件**：`tests/framework/test_suite.gd`、`tests/framework/test_runner.gd`、`tests/test_runner.tscn`、`tests/suites/*.gd`、`tests/README.md`。
 - **测试证据**：**16 用例 / 52 断言 / 0 失败 / 1 pending suite**；`RUN_EXIT=0`（实测输出见 `tests/README.md §1`）。
 
-## ES-5.5 · headless 静默验证脚本（导入 + check-only + tests）· S · ⏳ 待实施
+## ES-5.5 · headless 静默验证脚本（导入 + 校验 + tests）· S · ✅ 已完成
 
-- **目标**：把「`--import` → `--check-only` → `test_runner.tscn`」固化为一条可重复命令，供每次改动后自检。
+- **目标**：把「`--import` → 脚本可解析性校验 → `test_runner.tscn`」固化为一条可重复命令，供每次改动后自检。
 - **验收标准**：脚本任一环节失败即非零退出；输出仅保留结论行（PASS/FAIL + 出口码）。
+- **⚠ 实施取舍（2026-10-06）**：**不用裸 `--check-only`** —— 本项目几乎每个关键脚本都引用 Autoload `NetworkManager`，而 `--check-only` 不注册 Autoload → 必然误报 `Identifier not found: NetworkManager`；且 `--check-only <file>` 在本机 4.7.2 上挂起不退出（exit 124）。改用 `test_runner.tscn` 充当「可解析性 + 行为」双重门禁（普通场景运行 → Autoload 正常注册 → load+compile 被测脚本；注入语法错误时报 `Failed to load script ... Parse error`）。理由完整记录在 `tools/verify.sh` 头部注释与 `README.md`「一键自检」节。
 - **依赖**：ES-5.4。
 - **涉及文件**：**新增** `tools/verify.sh`（或 `tools/verify.gd`）；`README.md`（追加用法）。
 - **测试证据**：脚本自跑一次，PASS 时退出码 0。

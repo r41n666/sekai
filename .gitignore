@@ -4,3 +4,6 @@
 
 # 验收截图工具的临时输出目录（挑好的图再手动放进 docs/acceptance/）
 /_accept_tmp/
+
+# tools/verify.sh 的排查日志目录（失败时保留、成功时自动清理）
+/.verify_tmp/

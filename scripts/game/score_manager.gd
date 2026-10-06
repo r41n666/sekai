@@ -30,6 +30,11 @@ extends Node
 ##    本文件的取舍见下方 `_rpc_*` 命名块注释：**RPC 一律加 `net_` 前缀**，signal 保持契约原名。
 ## 3. **作弊面（附录 A.11.1，显式记录、不要默默带过）**：
 ##    客户端上报击杀，房主**不做二次校验**（不本地复算该击杀）——局域网熟人局 MVP 接受「信任客户端」。
+## 4. **A.4 契约已定稿但尚未实现的消息**（注意"契约已定 / 实现未到"）：
+##    `sync_match_state(state: int, countdown_remaining: float)`（房主 → 全端）——**附录 A.4 第 5 条，
+##    已由设计侧裁定定稿**，是客户端精确跟随 `match_state` 与倒计时 UI（`countdown_updated`）的唯一信息来源。
+##    **实际实现排在 S2（随 EP-4 ES-4.4）**，本文件当前**尚未实现**该 RPC。
+##    → 在它落地前，客户端状态仍靠 `_apply_sync()` 的临时兜底分支（见该函数注释）。
 ##    ⚠ 风险：恶意客户端可伪造 `report_kill` 刷分。缓解留待后续（见 A.11.1 与 EP-3 报告）。
 
 ## ── A.2 状态机 ──
@@ -55,6 +60,16 @@ signal match_state_changed(state: int)
 ##   `net_match_ended`（见"RPC 命名块"），signal 保持契约原名 `match_ended` 不动 —— HUD / 结算面板
 ##   按 A.5 绑定的就是这个名字，改名会波及 EP-4。
 signal match_ended(winner_id: int, final_scores: Dictionary)
+## COUNTDOWN 期间倒计时剩余秒数广播（3.0 → 0.0），供倒计时 UI（3-2-1）绑定。
+##
+## 为什么单列一条 signal（而不扩 `match_state_changed` 的签名，见 A.5 变更记录）：
+##   · 语义分离：`match_state_changed` 回答「状态变了没」（稀疏事件，最多 4 次/局）；
+##     `countdown_updated` 回答「还剩几秒」（高频，每帧/每秒）。
+##   · 纯增量：保持 A.5 既有 3 条签名不变 → 不破坏任何 HUD 绑定面。
+## 契约来源：A.4 `sync_match_state` 定稿后发现 A.5 绑定面缺口，裁定 team-lead（游承峰）2026-10-06。
+## 载荷语义与 A.4 `sync_match_state` 的 `countdown_remaining` 一致。
+## ⚠ 仅在 COUNTDOWN 期间有意义；离开 COUNTDOWN（进 LIVE / ENDED / IDLE）后**停止 emit**。
+signal countdown_updated(remaining: float)
 
 ## ── A.3 字段（默认值必须与契约完全一致，测试断言）──
 ## 当前状态机状态（见 MatchState）
@@ -333,13 +348,13 @@ func net_match_reset() -> void:
 
 ## 应用远端同步（`sync_scores` 核心）：覆盖本地 `scores` / `time_remaining` 并广播 `score_changed`。
 ##
-## ⚠ 客户端状态机推断（诚实说明）：附录 A.4 的消息清单里**没有**专门的「状态迁移 RPC」，
-##   只有 `sync_scores` / `match_ended` / `match_reset`。因此客户端无法被精确告知
-##   「现在进 COUNTDOWN 了 / 进 LIVE 了」。本实现的做法：
-##     · 收到 sync 且本地仍是 IDLE → 推断对局已在跑，置 LIVE（客户端的权威状态由房主隐含驱动）；
-##     · 收到 `net_match_ended` → ENDED；收到 `net_match_reset` → IDLE。
-##   这样客户端不会停在 IDLE 导致 `report_kill` 时期待的状态不一致，也不会自行递减计时
-##   （客户端 `is_authority() == false` → `_tick_live` 早退，时间只被 sync 覆盖）。
+## 客户端状态来源（附录 A.4 / A.9.1 已定稿）：客户端的 `match_state` 由 **`sync_match_state`**
+##   精确跟随（房主 → 全端，随 ES-4.4 实现）——`sync_scores` **不再承担状态推断职责**，只管比分与剩余时间。
+##
+## ⚠ 临时兜底（S2 落地 `sync_match_state` 后应移除或降级为超时保护）：在 `sync_match_state` 实现之前，
+##   客户端收不到任何状态迁移消息，会一直停在 `IDLE`，导致 `report_kill` 时期待的状态不一致。
+##   故此处暂以「收到 sync 且本地仍为 IDLE → 置 LIVE」作为过渡近似解。
+##   → 该分支是 **A.9.1 已作废的「客户端收 sync 推断 LIVE」** 的残留实现，仅为过渡期不卡死而保留。
 func _apply_sync(remote_scores: Dictionary, remote_time_remaining: float) -> void:
 	scores = remote_scores.duplicate(true)
 	time_remaining = remote_time_remaining
