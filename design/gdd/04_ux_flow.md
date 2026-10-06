@@ -46,7 +46,7 @@
 | --- | --- | --- | --- |
 | **Hub 大厅** | `scenes/hub/hub.tscn` + `hub.gd` | ✅ 建房/加入/玩家列表/开始/单人 | `NetworkManager` |
 | HUD · 动态准星 | `crosshair.gd` | ✅ 扩散 `5→34 px`、开镜 `2`、命中标记、换弹环 | `RecoilSystem.get_spread()` |
-| HUD · 小地图 | `minimap.gd` | ✅ 障碍/敌我/视野扇形/N（`world_radius 60`，已按 ⚑M-5 实现） | `player`/`camera`/`enemy`/`friendly`/`minimap_obstacle` 组 |
+| HUD · 小地图 | `minimap.gd` | ✅ 障碍/敌我/视野扇形/N（`world_radius 60`）；**超半径敌人 → 边缘方向箭头**（见 §3.5 / `03_map §6 AC-3`） | `player`/`camera`/`enemy`/`friendly`/`minimap_obstacle` 组 |
 | HUD · 指南针 | `compass.gd` | ✅ N/E/S/W + 刻度 | 摄像机偏航 |
 | HUD · 队友图标 | `teammate_icons.gd` | ✅ 3D 投影 + 贴边 + 名字/距离 | `friendly` 组 ⚠（FFA 下应停用，见 §6.2） |
 | HUD · 生命值 | `hud.gd` | ✅ 血条 + 数字（<30% 变红） | `health_changed` |
@@ -121,6 +121,25 @@
 
 ---
 
+### 3.5 超半径敌人的定位辅助（小地图边缘方向箭头）
+
+> **为什么需要**：小地图只画 `world_radius 60 m` 内的敌人（`minimap.gd:124` 超距 `continue`），而地图对角可达 `90.5 m`。2 人 FFA 出生于相邻角（`64 m`）时，**对方既不在雷达上、也无任何方向提示** → 找不到人 → 卡死「互相对射」的 G4。**本规格用一个极小改动补上「可定位性」。**
+
+| 项 | 规格 |
+| --- | --- |
+| 触发 | 敌对目标 `distance_to(player) > world_radius`（60 m） |
+| 表现 | 在**小地图圆周边缘**（半径 `world_radius - 2px` 处）沿「中心 → 目标」方向画**三角箭头**，颜色 = 敌对色 `#FF4738` |
+| **不给** | **不画精确点、不画距离数字**——只给「方位」，保留「敌人靠近才进雷达」的潜行价值 |
+| 形状 | **三角形**（区别于范围内的**方形**敌点 □，对齐 §6 M1 形状编码） |
+| 多目标 | 按角度分布；同类箭头**重叠时合并**（MVP 简单实现） |
+| 数据源 | `enemy` 组（FFA 下远程玩家 + bot 归此组，见 §6.2） |
+| 归属 | **EP-4（HUD/UX）**；`minimap.gd::_draw_group()` 扩展 |
+| 验收 | 见 `03_map_encounter.md §6 AC-3`：`70 m` 敌人 → 边缘箭头；`50 m` 敌人 → 范围内核敌方点 □ |
+
+> **设计取舍**：放弃「扩大 `world_radius` 到 ≥95 全图可见」（方案 a）——那会让全图敌人常显，**摧毁 FFA 的绕后/潜行张力**。箭头只给「方向」，是「最小信息量即可用」的解。
+
+---
+
 ## 4. 输入屏蔽矩阵
 
 > 现状由 `PlayerController.set_input_blocked(bool)` + 武器 `set_trigger_enabled(bool)` 实现。✅=可用 / ❌=屏蔽 / ⏳=不可操作但**计时继续** / 🔒=鼠标锁定。
@@ -166,7 +185,7 @@
 
 | 措施 | UI 规格 | 负责 |
 | --- | --- | --- |
-| **M1 · 形状优先** | 小地图：**敌对标记 = 实心方点 □**，我方 = 圆点 ○；**FFA 下无我方，全部方点**（见 §6.2） | 工程（`minimap.gd::_draw_group()`） |
+| **M1 · 形状优先** | 小地图：**敌对标记 = 实心方点 □**，我方 = 圆点 ○；**超半径敌人 = 边缘三角箭头 ▲**；**FFA 下无我方，全部方点/箭头**（见 §6.2 / §3.5） | 工程（`minimap.gd::_draw_group()`） |
 | **M2 · 明度次之** | 敌对标记用「暗底 + 亮描边」，我方用中明度实心 → 「高对比 = 敌人」 | 工程（`minimap.gd`） |
 | **M4 · 击杀标记形状** | 击杀标记在白色 `X` 外**加一圈环**或放大，不单靠颜色 | 工程（`crosshair.gd::_draw()`） |
 | **M6 · 低血/空弹第二线索** | 低血（<30%）血条加斜纹；空弹（`mag=0`）弹匣数字加下划线/图标 | 工程（`hud.gd`） |
@@ -212,6 +231,7 @@
 | 加载倒计时 | `network_manager.gd` + `main.gd` + `score_manager.gd` | 新增 3-2-1 冻结；客户端由 `sync_match_state` 获知 | 低（**依赖 `sync_match_state` RPC，见 `01_core_loop.md` 附录 A.4**） |
 | 比分数据 | 见 `01_core_loop.md` 附录 A | 新 `ScoreManager` | 中（RPC 时序） |
 | 敌我分组解耦 | `weapon.gd`/`knife.gd`/`minimap.gd`/`teammate_icons.gd` | 解耦伤害路由与显示分组 | **中（关键回归 AC-F2）** |
+| 小地图边缘箭头 | `minimap.gd::_draw_group()` | 超半径敌人画边缘方向箭头（§3.5 / `03_map AC-3`） | 低 |
 
 > **待 engineering-lead 评估**：① 路由键选型（方法探测 `has_method("apply_network_damage")` vs 中性组）；② 结算面板 [再来一局] 的复位流程（比分/位置/倒计时）；③ 比分板在 4 人名字过长时的截断策略。
 
