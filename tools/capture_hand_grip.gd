@@ -13,8 +13,7 @@ extends Node3D
 ##   grip_4_left34_on.png    左前 3/4 全身（第三机位），抓握开
 ##
 ## ⚠ 截图**专用**：ak47.glb 网格长轴是 +X 且远离自身原点 ~4.7m，与场景「前=+Z」约定不合，
-##   故本工具对武器做了「转向 + 落点」补偿（见 _ready / _align_gun），只为让截图里能看清枪；
-##   游戏侧武器摆放仍由 MikuModel / WeaponHoldIK 负责，本工具不改动游戏逻辑。
+##   本工具**不做任何补偿**，如实反映游戏内武器摆放（补偿已随 commit 4bf8db2 的根因修复一并移除）。
 
 const CAT_MODEL := "res://assets/models/cat_hatsune_miku/cat_hatsune_miku.glb"
 const RIFLE := "res://scenes/weapons/rifle.tscn"
@@ -23,12 +22,9 @@ const OUT_DIR := "C:/Users/Administrator/WorkBuddy/Worktrees/sekai/master-230e4f
 var _model: MikuModel
 var _frames := 0
 var _grip_on := false
-var _gun_local_off := Vector3.ZERO
-var _off_ready := false
 
 
 func _ready() -> void:
-	# 比 MikuModel 晚跑：先让模型把 WeaponMount 摆到 IK 握持点，再对武器做「模型原点补偿」（见 _align_gun）。
 	process_priority = 100
 	var cam := Camera3D.new()
 	cam.name = "Cam"
@@ -59,9 +55,6 @@ func _ready() -> void:
 	mount.name = "WeaponMount"
 	_model.add_child(mount)
 	var rifle := (load(RIFLE) as PackedScene).instantiate() as Node3D
-	# 截图专用：ak47 网格长轴是 +X（自身场景里零件在 +X≈4~5m），与场景/代码「前=+Z」约定差 90°，
-	# 不转的话枪是「横在胸前」。转 -90°Y 让长轴对齐 +Z，配合 _align_gun 把枪身落到双手握持点。
-	rifle.rotation_degrees = Vector3(0, -90, 0)
 	mount.add_child(rifle)
 	add_child(_model)
 	_model.position.y = 0.9
@@ -74,7 +67,6 @@ func _ready() -> void:
 func _process(d: float) -> void:
 	_frames += 1
 	_model.update_animation(1.0 / 60.0, 0.0, 0.0, false, true)
-	_align_gun()
 	if _frames == 40:
 		await _shoot(0, "front_off")
 	elif _frames == 44:
@@ -94,35 +86,11 @@ func _process(d: float) -> void:
 		get_tree().quit(0)
 
 
-## ⚠ 截图**专用**补偿（不改游戏逻辑、不属于手指抓握能力）：
-## ak47.glb 的网格在**自身场景原点 ~4.7m 之外**（Sketchfab FBX：零件在 +X≈4000~5200mm、
-## 由 0.001 缩放节点带入），导致武器挂点即便正确摆在 IK 握持点，枪身仍渲染在角色 ~4m 外、
-## 完全出画。本函数把**枪网格重心**平移回挂点（= IK 握持点），只为让截图里能看见「手指环握枪身」；
-## 真实游戏里武器摆放由 MikuModel._process / WeaponHoldIK.get_weapon_transform 负责（本次不动）。
-func _align_gun() -> void:
-	var m: Node3D = _model._weapon_mount
-	if m == null or m.get_child_count() == 0:
-		return
-	var gun := m.get_child(0) as Node3D
-	if gun == null:
-		return
-	if not _off_ready:
-		if _frames < 25:
-			return
-		# 目标点 = 双手 IK 握持点的中点（枪身落点）。
-		var want: Vector3 = _grip_midpoint()
-		var c: Vector3 = _world_aabb(gun).get_center()
-		# 纯方向变换：用 basis.inverse()（不要 affine_inverse，它会把 v 当点、减去 origin）
-		_gun_local_off = m.global_transform.basis.inverse() * (c - want)
-		_off_ready = true
-	m.global_position -= m.global_transform.basis * _gun_local_off
-
-
-func _grip_midpoint() -> Vector3:
-	var ik = _model._hold_ik
-	if ik != null and ik._target_r != null and ik._target_l != null:
-		return (ik._target_r.global_position + ik._target_l.global_position) * 0.5
-	return Vector3(0.0, 1.15, 0.0)
+## ⚠ 已移除的截图补偿（2026-10-07）：
+## 本工具曾对 ak47 做「转 -90°Y + 重心平移」补偿，因为当时场景占位 transform 是错的
+## （`.tscn` 的 12 浮点 transform 与变体表差一个转置）⇒ 枪渲染到角色 ~2~4m 外。
+## 该缺陷已在 commit `4bf8db2` 从根上修掉（同步 `weapon_variant.gd` 的 transform + 场景占位）。
+## ⇒ 补偿**必须删掉**，否则会二次修正、反而把枪推歪。本工具现在如实反映游戏内效果。
 
 
 func _set_grip(on: bool) -> void:
