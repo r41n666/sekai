@@ -2,11 +2,16 @@ extends RefCounted
 class_name HitSounds
 ## 受击音效素材池：扫描 `res://sfx/hit_female/` 下**所有** `.wav`，**每次受击随机取一条**播放。
 ##
-## ⚠ 这些 wav **未被 Godot 导入**（`sfx/` 下没有任何 `.import`）⇒ 常规 `load()` 拿不到。
-##   故加载分三级（绝不崩、不报错刷屏）：
-##     ① `AudioStreamWAV.load_from_file()` **直读 WAV** —— headless / 未导入 / 源码运行都能出声；
-##     ② 退回 Godot 导入资源 `load()` —— 将来若用编辑器补了 `.import`、或导出包内，走这条；
-##     ③ 都失败 → 返回 `null`，由**调用方**自行降级（bot 退回程序化合成音；player 静音）。
+## 加载分三级（绝不崩、不报错刷屏）：
+##   ① `AudioStreamWAV.load_from_file()` **直读 WAV** —— **首选**。不依赖 Godot 的导入缓存是否就绪，
+##      在 headless / 未导入 / 源码运行 / 导入参数变化后都能出声。
+##   ② 退回 Godot 导入资源 `load()` —— 导出包内、或将来重设导入参数时走这条。
+##   ③ 都失败 → 返回 `null`，由**调用方**降级（bot 退回程序化合成音；player 静音）。
+##
+## 注：这些 wav **现已被 Godot 导入**（`sfx/hit_female/` 下有 27 个 `.wav.import`），
+##   所以本文件早先「未被导入 ⇒ 常规 load() 拿不到」的注释已过时——但**结论不变**，
+##   仍以 `load_from_file()` 为首选（理由见上）。
+
 ##
 ## 用法（⚠ 必须用 `preload` 引用，**不要**依赖全局 `class_name` ——
 ## 见 control_checklist §4-17：全局类缓存在未开编辑器时可能未注册，headless 会找不到类型）：

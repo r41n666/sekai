@@ -71,3 +71,28 @@
   4. 若渲染出舞台 / 白板 → 登记 `MODEL_STRIP_PROPS`；
   5. 若需要更强的待机微动 → 登记 `IDLE_PROFILES`。
 - 发布（release-ops）前必须评估资源打包与扫描列表的兼容性。
+
+---
+
+> **2026-10-07 更新**（**追加说明，正文原样保留**）：
+>
+> 1. **本 ADR 的"目录名即身份"机制今天完全有效**，`MikuModel.list_available_models()`
+>    仍按 `assets/models/<目录名>/<文件>.glb` 扫描。**无需改动。**
+>
+> 2. **⚠️ 资源精简后，配置表的现状（正文里的示例登记项多数已随模型删除）**：
+>    2026-10-07 删除了 **9 个模型目录**，现存**仅 4 个**：
+>    `miku/`（默认，**554 根骨骼名是乱码 MMD 名**）、`cat_hatsune_miku/`（**标准骨架，本项目实际用的**）、
+>    `miku_ps/`、`miku_statue/`。
+>    - `MODEL_YAW_CORRECTION`：现只剩 `miku_statue → 180.0`；
+>      原 `miku_classic → 180.0`（该模型已删）**已注释掉**。
+>    - `MODEL_STRIP_PROPS`：现只剩 `cat_hatsune_miku → ["plane_001"]`；
+>      原 `miku_classic → ["floor","lamp","hairshadow"]`（该模型已删）**已注释掉**。
+>    - `IDLE_PROFILES` / `MODEL_FIT_SCALE`：以 `miku_statue` 为主。
+>    ⇒ **正文第 3~5 步 SOP 依然有效，但每条都要先确认"目标模型是否还存在"** ——
+>    按目录名登记意味着**模型一删，登记项就成了指向不存在模型的死配置**。
+>
+> 3. **删除模型时的配套纪律（本 ADR 的直接推论）**：
+>    删 `assets/models/<目录>/` 之前，**必须 `rg` 全库该目录名**，至少覆盖三处：
+>    ① 上面三张配置表（`miku_model.gd`）；② **本 ADR 等历史文档**（只追加"已删除"说明，不改正文）；
+>    ③ README / `design/art/*.md` 等对外文档 —— **文档教人操作一个不存在的资源，比文档过时更严重**。
+>    另：本文第 2 步的 `--import` 警告依然有效且**已复发多次**，见 `control_checklist.md` §4-17。

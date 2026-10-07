@@ -16,7 +16,7 @@
 | 阶段 1 | 高画质 3D 小场景自由走动 + 本地 `.ogg` 歌单 | ✅ 已完成 |
 | 阶段 2 | 战地 5 风格 HUD + 射击手感 | ✅ 已完成（武器全部换成真实模型；新增武器**外观变体**（每槽多模型）+ 皮肤 + 3D 检视。USP-S 赛睿 / FPS 蝴蝶刀已按武器空间约定校准） |
 | 阶段 3 | 局域网联机（蓝盾 VPN + ENetMultiplayerPeer） | ✅ 已完成（基础版；断线重连等见 TODO） |
-| 阶段 4 | 初音未来模型导入与动画替换 | 🟡 已接入 6 个模型（主模型 + 3 个 PMX 转换模型 + cat_hatsune_miku + miku_classic）；多数模型无动画剪辑，用程序化步态 + 程序化待机微动作 |
+| 阶段 4 | 初音未来模型导入与动画替换 | 🟡 已接入 **4 个模型**（`miku`（默认）/ `cat_hatsune_miku` / `miku_ps` / `miku_statue`）；接入 Quaternius UAL 动画库做 locomotion（腿+躯干），叠加程序化步态 + 程序化待机微动作兜底。<br>⚠️ 2026-10-07 资源精简：删掉了 9 个模型目录（`miku_navy` / `miku_maid` / `miku_classic` / `miku_nightcord` 等，详见 §十一 注） |
 | 阶段 5 | 菜单 / 死亡重生 / 人机系统（Esc 菜单、重生、H 人机） | ✅ 已完成（人机仅本端生成、不联机同步） |
 
 ---
@@ -78,7 +78,9 @@ bash tools/verify.sh -v       # 详细模式：追加各环节（含 import）�
 
 ### 场景里有什么
 
-- **白云蓝天 + 水面地面**（复刻 sky.jpeg 的构图）：400×400 的镜面水面（反射云层与角色）+ 程序化云层天空。
+- **白云蓝天 + 水面地面**：400×400 的镜面水面（反射云层与角色）+ 程序化云层天空。
+  （构图参考图 `sky.jpeg` 已于 2026-10-07 随资源精简删除；天空现由 `high_quality_environment.tres` 的
+  `ProceduralSkyMaterial` **程序化生成，零外部贴图依赖** —— 下方"参考构图"的描述保留作为观感目标。）
 - 场景里没有其它实体（道具 / 训练靶 / 队友占位都已移除），只留风景和初音未来；联机时其他玩家照常生成。
 
 ---
@@ -95,7 +97,7 @@ MikuHighQualityWalk/
 │   ├── player.tscn                        # 玩家：移动体 + 占位胶囊 + 武器 + 摄像机链
 │   ├── bot.tscn                           # ✅ 人机：CharacterBody3D + MikuModel + rifle 外观
 │   ├── weapons/
-│   │   ├── rifle.tscn                     # ✅ 主武器：M4A4 突击步枪（真实模型，700 发/分全自动）
+│   │   ├── rifle.tscn                     # ✅ 主武器：AK-47 突击步枪（真实模型，700 发/分全自动）
 │   │   ├── usp.tscn                       # ✅ 副武器：USP（12/24、半自动）
 │   │   ├── knife.tscn                     # ✅ 蝴蝶刀（近战，挥砍）
 │   │   ├── grenade.tscn                   # ✅ 手雷（手持模型）
@@ -114,6 +116,12 @@ MikuHighQualityWalk/
 │   │   ├── miku_model.gd                  # ✅ 初音模型挂载点：加载 glb + 尺寸适配 + 朝向补正 + 清理舞台道具 + 动画 / 武器挂手 + 接线待机微动作
 │   │   ├── miku_procedural_pose.gd        # ✅ 无动画模型的程序化姿态（放下 T-pose、走/跑/跳摆动）
 │   │   ├── miku_idle_motion.gd            # ✅ 程序化「待机微动作」：呼吸起伏 + 重心微移 + 上身摆动（正弦 + 交叉频率，无循环接缝）
+│   │   ├── ual_locomotion.gd              # ✅ Quaternius UAL locomotion：腿 + 躯干 + 空手手臂（默认开启）
+│   │   ├── ual_bone_map.gd                # ✅ UAL 骨 → 角色骨映射表（52/53）
+│   │   ├── weapon_hold_ik.gd              # ✅ 持枪时接管双臂贴枪身（hold_ik_enabled，默认关闭）
+│   │   ├── hand_grip_modifier.gd          # ✅ 手指抓握（hand_grip_enabled，默认关闭；仅 IK 生效时应用）
+│   │   ├── hand_grip.gd                   # ✅ 手部抓握状态辅助
+│   │   ├── miku_combat_anim.gd            # ✅ 战斗动作层（射击 / 换弹等程序化叠加）
 │   │   ├── bot.gd                         # ✅ 人机：追踪 / 周期射击 / 受击后仰 + 闪白 + 音效 / 倒地
 │   │   └── bot_manager.gd                 # ✅ 人机刷新与数量管理（玩家周围 8~18 m，仅本端）
 │   ├── shooting/
@@ -125,7 +133,8 @@ MikuHighQualityWalk/
 │   │   ├── camera_sway.gd                 # ✅ 相机摇晃：鼠标惯性滞后 + 行走晃动 + 侧倾
 │   │   ├── screen_shake.gd                # ✅ 屏幕震动：Trauma / FastNoiseLite 噪声
 │   │   ├── weapon_skin.gd                 # ✅ 武器皮肤：程序化贴图（伽玛多普勒 / 渐变之色 / 蓝钢）+ 套用/清理
-│   │   ├── weapon_variant.gd              # ✅ 武器外观（模型变体）：每槽多模型 + 武器空间摆放/枪口/第一人称/裁离群几何
+│   │   ├── weapon_variant.gd              # ✅ 武器外观（模型变体）：**每槽 1 个** + 武器空间摆放/枪口/第一人称
+│   │   ├── hit_sounds.gd                  # ✅ 受击音效素材池：扫 sfx/hit_female/ 全部 wav（27 条），每次受击随机取一条
 │   │   └── audio_3d.gd                    # ✅ 3D 枪声：音高/音量 ±5% 随机 + 程序化占位枪声
 │   ├── ui/
 │   │   ├── hub.gd                         # ✅ 联机大厅界面逻辑
@@ -142,18 +151,18 @@ MikuHighQualityWalk/
 │       └── network_manager.gd             # ✅ Autoload：ENet 建房/加入/断开、玩家列表、开局与生成协调、伤害与击杀 RPC
 ├── assets/
 │   ├── environments/
-│   │   ├── high_quality_environment.tres  # ✅ 程序化云层天空 / ACES / Glow / SSAO / SSR / 体积雾
-│   │   ├── grasslands_sunset_4k.hdr       # 备选 HDRI（草原黄昏，当前未启用，可自行换用）
-│   │   └── sky.jpeg                       # 参考图（白云蓝天 + 水面反射构图）
+│   │   └── high_quality_environment.tres  # ✅ 程序化云层天空（ProceduralSkyMaterial，零外部贴图）/ ACES / Glow / SSAO / SSR / 体积雾
+│   ├── animations/
+│   │   └── ual/
+│   │       └── AnimationLibrary_Godot_Standard.glb  # ✅ Quaternius UAL 动画库（46 条剪辑，Godot Standard 骨架）
 │   └── models/
-│       ├── miku/                          # 主模型 miku.glb（自动加载，见 miku_model.gd）
-│       ├── miku_navy/                     # 小海军初音（由 PMX 转换，见 tools/pmx2glb.py）
-│       ├── miku_maid/                     # 猫猫女仆 1 / 2（由 PMX 转换）
+│       ├── miku/                          # 默认主模型 miku.glb（自动加载，见 miku_model.gd；⚠️ 554 根骨骼名是乱码 MMD 名）
+│       ├── cat_hatsune_miku/              # ✅ 猫耳初音（标准骨架 + 自带 idle 剪辑；**本项目实际使用的骨架来源**）
 │       ├── miku_ps/                       # Hatsune Miku（Sketchfab，532 joint）
 │       ├── miku_statue/                   # Sketchfab 雕塑（无骨骼无动画；登记了 180° 朝向补正）
-│       ├── miku_classic/                  # ✅ Sketchfab「Classic」导出（230 骨骼 + 自带展示台；登记 180° 朝向补正、清理 Floor/Lamp）
-│       ├── cat_hatsune_miku/              # ✅ 猫耳初音（111 骨骼 + 自带 idle 动画剪辑，无需补正）
-│       └── weapons/                       # ✅ 各武器槽的多个外观模型（AK-47 / M4A4 / USP-S 赛睿 / 粉色 USP / FPS 蝴蝶刀 / hudidao 蝴蝶刀 / PUBG 手雷 / 青花瓷手雷）
+│       └── weapons/                       # ✅ 各武器槽的外观模型，**每槽 1 个**：ak47 / usp_cyrex / knife_fps / grenade_pubg
+├── sfx/
+│   └── hit_female/                        # ✅ 受击音效素材池（27 个 wav，每次受击随机取一条）
 ├── tools/
 │   ├── pmx2glb.py                         # ✅ PMX(MMD) → glb 转换器（BMP 贴图转 PNG / 野顶点剔除 / 贴图去重 / 朝向归一）
 │   ├── obj2glb.py                         # ✅ OBJ → glb（武器模型用，含贴图内嵌）
@@ -193,11 +202,14 @@ MikuHighQualityWalk/
 3. 把 `Sky` 资源的 `Sky Material` 从 `ProceduralSkyMaterial` 改成 `PanoramaSkyMaterial`，拖入 `.hdr`。
 4. （可选）把 `Sky.process_mode` 设为 `Realtime`。
 
-### 天空与水面（sky.jpeg 效果）
+### 天空与水面（程序化云层）
 
 - **天空**：`ProceduralSkyMaterial` —— 蓝天渐变 + **程序化云层**（`sky_cover` 用一张无缝噪声纹理做云量），
-  想换照片级 HDRI：把 `Sky Material` 换成 `PanoramaSkyMaterial` 并拖入 `.hdr`
-  （项目里自带的 `grasslands_sunset_4k.hdr` 是草原黄昏 HDRI，云不多）。
+  **零外部贴图依赖**（原随项目分发的 `sky.jpeg` 参考图与 `grasslands_sunset_4k.hdr` 备选 HDRI
+  已于 2026-10-07 随资源精简删除，合计约 25.7 MB）。
+  想换照片级 HDRI：把 `Sky Material` 换成 `PanoramaSkyMaterial` 并拖入 `.hdr`（见上一节）。
+- **参考构图（历史）**：早先按一张「白云蓝天 + 镜面水面」参考图（`sky.jpeg`）复刻构图，该图已删除；
+  当前观感仍以此为目标，但实现完全程序化。
 - **水面**：主场景地面是 400×400 的镜面平面（`metallic 1.0 / roughness 0.06`），靠天空辐射 + SSR 反射云层和角色；
   想调"水感"改 `scenes/main.tscn → Ground/MeshInstance3D` 的材质（金属度/粗糙度/水色）。
 
@@ -277,7 +289,9 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 
 ### 6.4 武器与装备槽
 
-`1` 主武器（**M4A4 突击步枪**：700 发/分全自动、30/120）｜ `2` 副武器（**粉色 USP**）｜ `3` **蝴蝶刀**（近战，真实模型）｜ `4` **青花瓷手雷**（3 颗）
+`1` 主武器（**AK-47 突击步枪**：700 发/分全自动、30/120）｜ `2` 副武器（**USP-S 赛睿**）｜ `3` **蝴蝶刀**（近战，真实模型）｜ `4` **M67 手雷**（3 颗）
+> ⚠️ 2026-10-07 资源精简：这一槽位过去是「M4A4 / 粉色 USP / 青花瓷手雷」，那三个模型**已删除**；
+> 现为 `ak47` / `usp_cyrex` / `knife_fps` / `grenade_pubg`。**枪械参数表未变**，只是换了外观模型。
 同一键再按一次 = **空手**（收起武器）。`R` 换弹对所有枪械生效；**长按 R 3 秒把备弹 / 手雷数量补满**。
 
 | USP 参数 | 默认值 |
@@ -297,20 +311,34 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 > 数值都是节点导出参数，`display_name` 会显示到 HUD。
 
 **武器外观（模型变体）**（[weapon_variant.gd](scripts/shooting/weapon_variant.gd)）：
-- 一个武器槽可以挂**多个模型**（`VARIANTS` 表，第一条 = 默认外观）；`Esc` 菜单右侧的「**外观（模型）**」列表切换，
-  选中即 `WeaponVariant.apply_to()`：换掉 `Model` 子节点、整体搬 `Muzzle` 等四个功能节点、设第一人称 `view_offset`、重套皮肤。
+- **⚠️ 现状：每槽只有 1 个变体**（资源精简后）。`VARIANTS` 表**结构未变**（仍是数组、第一条 = 默认外观），
+  能力也还在，但当前内容是：
+
+  | 槽 | 变体 id | 模型 | 武器空间实测 |
+  | --- | --- | --- | --- |
+  | `Rifle` | `ak47` | `ak47.glb` | 长 0.88 m、Muzzle z=0.450 |
+  | `USP` | `usp_cyrex` | `usp_cyrex.glb` | 长 **0.4135 m**（含消音器，USP-S 真实长度）、对中、Muzzle z=0.197 |
+  | `Knife` | `knife_fps` | `knife_fps.glb` | 长 **0.28 m**、对中、刀尖在 +Z、`hide` 掉 `Object_65` 手臂 |
+  | `Grenade` | `grenade_pubg` | `grenade_pubg.glb` | ~0.10 m 级 |
+
+- **⚠️ `Esc` 菜单右栏的「外观（模型）」变体选择列表已删除**（每槽只剩 1 个，选择冗余）。
+  `WeaponVariant` 仍在**菜单之外**生效：装备武器时按 `get_selected()`（= 默认变体）自动套用
+  `apply_to()` —— 换 `Model` 子节点、整体搬 `Muzzle` 等四个功能节点、设第一人称 `view_offset`、重套皮肤。
+  **武器皮肤（`WeaponSkin`）选择列表保留**。要恢复多外观需同时改三处：`VARIANTS` 补条目 + `game_menu.gd` 恢复列表 + 本节。
 - **武器空间约定**（所有外观都要满足）：`+Z = 枪口方向`、`+Y = 上`、模型对中到原点，`Muzzle` 落在包围盒 `+z` 端内侧。
-  当前各外观实测（`godot --headless --path . res://tools/weapon_variant_check.tscn`）：AK-47 长 0.88 m（Muzzle z=0.450）、
-  M4A4 0.90 m、**USP-S 赛睿 0.22 m（对中，Muzzle z=0.10）**、**FPS 蝴蝶刀 0.28 m（对中，刀尖在 +Z）**、手雷均为 ~0.10 m 级。
+  自检命令：`godot --headless --path . res://tools/weapon_variant_check.tscn`。
 - ⚠ **Transform3D 两种写法互为转置**：GDScript 的 `Transform3D(轴x, 轴y, 轴z, 原点)` 传的是**轴向量**；`.tscn` 里
   `Transform3D(9 个浮点, 3 个原点)` 的 9 个浮点按**矩阵行**读（第一行 = 三根轴的 X 分量）。手改 `.tscn` 必须转置，否则模型会「左右 / 前后反」。
 - ⚠ **glTF 内层节点链会把 Sketchfab 的 ×100 缩放 / 换轴烘进顶点**：所以量「离群几何」和写 `trim` 时用的都是**导入后的网格本地坐标**，
   不是 glb 文件里的原始数字（两者差一个缩放 + 换轴）。工具里的 `RAW` 阶段看的是原始文件、变体阶段看的是武器空间，别混。
 - ⚠ **离群几何**：Sketchfab 导出常把「浮空小圈 / 占位体 / 打包进来的手臂」和枪身塞进**同一个 surface**，按节点名删不掉，
   却会把包围盒撑大、让按 AABB 算的缩放 / 对中全偏。为此外观支持两个字段：
-  - `hide`：按**节点名包含**删除整块网格（例：FPS 蝴蝶刀删掉混进来的第一人称手臂 `Object_65`）；
+  - `hide`：按**节点名包含**删除整块网格（例：FPS 蝴蝶刀删掉混进来的第一人称手臂 `Object_65`）—— **优先用它**；
   - `trim`：给一个**网格本地坐标** AABB（每轴 `[min, max]`，`null` 不限），只保留三个顶点都落在框内的三角形（重建 surface）。
-    例：USP-S 赛睿枪口侧有 4 组浮空小圈（和枪身同 surface），按本地 `z ≤ 11` 裁掉（实测保留 11311 / 11985 个三角形）。
+    > ⚠️ **别急着 `trim`**：曾用它裁掉 USP「枪口侧 4 组浮空小圈」，后被渲染对比 + 探针**证伪** ——
+    > 那 4 组其实是**消音器上的环形分段**，裁掉等于把消音器与枪管前端齐刷刷切掉（看着像"没有枪管"）。
+    > **⇒「看起来是瑕疵的几何」在裁之前必须先确认它是什么**；`hide` 有语义（按名字），`trim` 只有坐标。
+    > 当前四个变体**都没有 `trim`**。
   - 注意 `ArrayMesh.get_aabb()` 在网格被重建后**不会自动刷新**，核对时要用 `get_faces()` 自己算包围盒。
 - **皮肤叠在模型之上**：换模型会重建网格、丢掉 `material_override`，所以 `apply_to()` 最后会重新 `apply_skin()` 一遍。
 
@@ -335,10 +363,12 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 4. **朝向与左右**：模型正面应为 **+Z**、**右手在 -X**（`player.gd` 的转向基准；miku.glb 的 `.R` 骨骼、PMX 的「右手首」都在 -X）。
    正面不是 +Z 时改 `MikuModel.yaw_offset_deg`（朝 -Z 填 180）；PMX 转换时的左右问题见「PMX → glb 转换」一节。
    **逐模型朝向补正表** `MikuModel.MODEL_YAW_CORRECTION`（键 = 模型所在**目录名**）用于个别和项目约定相反的模型，
-   在 `yaw_offset_deg` 之外**再叠一次**，只影响该模型、不动其它模型。目前登记：`miku_statue → 180°`、`miku_classic → 180°`
-   （两者都是 Sketchfab 导出，原文件正面朝 -Z；实测 +Z 机位看到的是后脑）。判定方法见「阶段 5 补充：趴下姿态与朝向补正」。
+   在 `yaw_offset_deg` 之外**再叠一次**，只影响该模型、不动其它模型。目前登记：`miku_statue → 180°`
+   （Sketchfab 导出，原文件正面朝 -Z；实测 +Z 机位看到的是后脑）。判定方法见「阶段 5 补充：趴下姿态与朝向补正」。
+   > ⚠️ 原先还登记过 `miku_classic → 180°`，该模型已于 2026-10-07 删除，登记项已在代码里注释掉；
+   > 若日后加回需**重新登记**（`miku_model.gd::MODEL_YAW_CORRECTION`）。
 4.1 **展示台道具清理**（`MikuModel.MODEL_STRIP_PROPS`，键 = 模型目录名）：有些 Sketchfab 导出会把**整个展示台**打包进来
-   （`miku_classic` 带 `Floor`（6.8×6.8 白板）+ `Lamp` / `Lamp2` + `Hairshadow`；`cat_hatsune_miku` 带一块 `Plane_001`），
+   （`cat_hatsune_miku` 带一块 `Plane_001`，登记为清理关键字；另一个带 `Floor`（6.8×6.8 白板）+ `Lamp` / `Lamp2` + `Hairshadow` 的模型已删除），
    在游戏里会渲染成角色脚下的白板 / 悬浮物件，而且**污染包围盒测量**（自动缩放会拿「舞台」当身高算）。
    实现上按关键字删掉命中的节点（连同子树），且**在量包围盒之前**清掉。只对表里点名的模型生效——
    `miku.glb` 自带的 `Light` / `Camera` 是既有功能要用的，不能误删。
@@ -350,8 +380,63 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
    骨骼是启发式识别的（脚→大腿→膝→踝、手→上臂→肘沿父链定位，骨骼名乱码也能用），识别失败保持原姿态；
    幅度 / 步频区间等常量在该脚本顶部。
    > 判定条件是「**有没有匹配到 idle/walk/run 剪辑**」，不是「有没有 AnimationPlayer」——
-   > 像 `miku_classic` 只有一条叫 `Take 01` 的动画（名字对不上任何状态），如果只看 `_anim != null`
-   > 就会既不播动画、又不启用程序化姿态，角色僵在 T-pose。现在这类模型会自动走程序化姿态。
+   > 有些模型只带一条名字对不上任何状态的动画（如已删除的 `miku_classic` 只有 `Take 01`），
+   > 如果只看 `_anim != null` 就会既不播动画、又不启用程序化姿态，角色僵在 T-pose。现在这类模型会自动走程序化姿态。
+5.0 **⚠️ 退化剪辑（degenerate clip）——「播完等于没播」的剪辑绝不能播**：
+   某些模型自带的 `idle` 剪辑其实是 **0.08 s 的 T-pose 定格**（例：cat 的 `idle` 仅 0.083 s、98 条骨轨只有 1 条在动）。
+   若把它设成循环播放，AnimationPlayer 会以 **1/0.083 ≈ 12 Hz** 反复重写**全身骨骼姿态** ⇒ 表现为
+   **轻微抽搐 + 周期性闪回 T-pose**（2026-10-07 修复的真根因）。
+   - **判据（两个条件同时成立才算退化）**：`时长 < 0.2 s`（`DEGENERATE_MIN_LENGTH`）**且**
+     `会动骨轨占比 < 15%`。实现见 `miku_model.gd::is_degenerate()`。
+   - **处置**：退化剪辑**不得设 `LOOP_LINEAR`、不得 `play()`** —— 一律让位给程序化姿态 / UAL。
+   - 守护测试：`tests/suites/test_degenerate_clip.gd`。
+   > 📌 **历史教训（值得记的通用陷阱）**：当时的 3 条测试断言**把「T-pose 不动」写成了期望行为**
+   > （"无剪辑时程序化姿态应保持 T-pose"），于是 bug 被测试锁住、全绿掩盖了抽搐。
+   > ⇒ **断言可能锁住 bug 本身**；发现"实现行为很怪但测试是绿的"时，先质疑断言的期望值从哪来。
+5.05 **🦴 动作系统现状：双层驱动 + 两个可选叠加层（2026-10-07 大改）**：
+
+   **主链路（互斥，二选一 —— 避免两层同时写腿骨）**：
+
+   | 层 | 负责 | 默认 | 开关 |
+   | --- | --- | --- | --- |
+   | **Quaternius UAL locomotion** | 腿 + 躯干（走 / 跑 / 蹲 / 跳），**外加空手时的手臂** | **✅ 开启** | `ual_locomotion_enabled = true` |
+   | **程序化步态**（`miku_procedural_pose.gd`） | UAL **未生效时**的兜底（放下 T-pose、屈膝抬脚、身体起伏） | ✅ 自动接管 | `ual_locomotion_enabled = false` 时接管 |
+
+   **降级链（保证绝不出现"没腿"）**：UAL 开关关 ⇒ 程序化姿态接管腿；
+   UAL 素材缺失 / 骨架不匹配 ⇒ 同样回退程序化姿态。
+   ⚠️ 默认打开**不影响默认模型 `miku.glb`** —— 它的 554 根骨名是乱码 MMD 名、骨映射配不出驱动骨
+   ⇒ `is_ual_locomotion_active()` 恒 false ⇒ 照旧由程序化姿态接管
+   （守护用例 `test_ual_switch_on_does_not_disturb_default_model`）。
+   **实测只有 `cat_hatsune_miku`（标准骨架）会真正走 UAL。**
+
+   **可选叠加层（默认全关，互不影响主链路）**：
+
+   | 层 | 作用 | 默认 | 开关 |
+   | --- | --- | --- | --- |
+   | `WeaponHoldIK` | **持枪时接管双臂**（TwoBoneIK3D 拉到两个握持点，武器朝向由握持点推导） | ❌ 关 | `hold_ik_enabled = false` |
+   | `HandGripModifier` | **手指抓握**（15 根指骨弯到握枪角） | ❌ 关 | `hand_grip_enabled = false` |
+   | （历史 Spike 开关） | 「腿程序化 + 手臂 IK」分层模式 | ❌ 关 | `procedural_legs_enabled = false` —— ⚠️ **与 `ual_locomotion_enabled` 互斥**，UAL 有效时**不需要**打开它 |
+   | （同上配套） | 分层模式下把握持点挂到躯干骨 | ❌ 关 | `hold_ik_torso_anchor = false`（实测：修正偏差 3.3 cm < 引入残差 6 cm，收益为负） |
+
+   - **手臂归属**（本开关**不**碰手臂）：**持枪 → `WeaponHoldIK`（双臂）+ `HandGripModifier`（手指）；
+     空手 → UAL 驱动手臂**（实测决策：cat 的 rest 是 T-pose，空手无人接管会笔直平举穿帮）。
+     两者之间按 `UAL_ARM_BLEND_TIME = 0.18 s` 渐变切换。
+     ⚠️ `HandGripModifier` **只在 IK 生效时才应用**（空手 / 第一人称 / IK 关闭时不握拳），故需 `hold_ik_enabled` 同时为 true。
+   - **⚠️ `ual_sprint_threshold = 1.1` ⇒ 冲刺档永远够不到 `Sprint` 剪辑**：
+     这是**故意的**（用户实机验收项）。依据不是猜的：`anim_ratio := clampf(move_speed / sprint_speed, 0, 1)`
+     **值域恒为 [0, 1]、上界 1.0**，而阈值取 1.1 ⇒ `speed_ratio >= sprint_threshold` **永远为假**
+     ⇒ Sprint 剪辑永不播放（仍注册在表里，**随时可调回 ≤ 1.0 启用**）。
+     目的：排除会**双马尾穿帮**的大动作 Sprint（UAL 是通用人形骨架，头发是单根骨骼，跟不出本项目的物理摆动）。
+   - **蹲姿用 `Crouch_Fwd` 而不是 `Crouch_Idle`**（实测决策，非随意选择）：
+     `Crouch_Idle` 虽然 85% 的骨轨都在动，但**腿角仅 10.8°**（≈静止），拿它播移动会出现
+     「人在平移但腿几乎不动」的**滑步**，比用 Walk 更假；UAL 里确实有 `Crouch_Fwd`（腿角 96.4°），没理由不用。
+   - UAL 素材：`assets/animations/ual/AnimationLibrary_Godot_Standard.glb`（**46 条剪辑 / 53 骨骨架**，
+     Godot Standard 骨架）。骨映射 `ual_bone_map.gd`（52/53）。
+     ⚠️ cat 的骨名带 `_NN` 数字后缀（如 `upper_arm.L_68`），不是纯 Rigify 命名 ⇒ 影响任何基于名字的脚本。
+   - 完整评估结论（哪些动作可用、哪些穿帮、`Pistol_Shoot` / `Death01` 为何与本项目冲突）见
+     **[`docs/architecture/ual_retarget_evaluation.md`](docs/architecture/ual_retarget_evaluation.md)**。
+   - 守护测试：`test_ual_locomotion.gd` / `test_weapon_hold_ik.gd` / `test_hand_grip.gd` / `test_procedural_legs_layer.gd` / `test_degenerate_clip.gd`。
+
 5.1 **待机微动作**（[miku_idle_motion.gd](scripts/entities/miku_idle_motion.gd)，对所有模型生效）：
    在 `MikuModel` 与载入的模型之间插一层 `IdleMotion` 节点，叠加**呼吸起伏 + 重心微移 + 上身摆动**，
    让站桩不再像一尊雕像（对 `miku_statue` 这种无骨骼无动画的「雕塑型」资源尤其明显）。
@@ -396,7 +481,10 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 ### 8.1 Esc 菜单（[game_menu.tscn](scenes/ui/game_menu.tscn)）
 
 - **角色选择**：扫描 `assets/models/*/*.glb` 生成按钮列表，点击即切换本地玩家的 `MikuModel`（自动重载模型 + 尺寸适配 + 武器挂手）；
+  **当前只有 4 个模型可选**（`miku` / `cat_hatsune_miku` / `miku_ps` / `miku_statue`）；
 - **武器皮肤 + 3D 检视**：右侧上半是武器槽 + 皮肤列表（原版 / 伽玛多普勒 / 渐变之色 / 蓝钢），下半是 3D 检视（SubViewport 自转、包围盒自动取景），点皮肤即刻套到本端武器；
+  > ⚠️ 右侧原有一块**「外观（模型）」变体选择列表，已于 2026-10-07 删除**（每槽只剩 1 个变体，选择冗余）。
+  > 变体仍在菜单之外按默认外观自动套用。详见 §6.4。
 - **退出游戏**：联机时先 `NetworkManager.leave_game()` 退出房间，再 `get_tree().quit()`；
 - **输入屏蔽**：菜单打开时释放鼠标，并屏蔽移动 / 跳跃 / 开火 / 开镜（`PlayerController.set_input_blocked` + 武器 `set_trigger_enabled`；已开始的换弹计时继续走）；
 - 与死亡界面 / 人机面板互斥：三者都在 `game_ui` 组，打开一个会自动关掉其它界面。
@@ -409,11 +497,11 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 ### 8.3 人机系统（[bot.tscn](scenes/bot.tscn)、[bot.gd](scripts/entities/bot.gd)、[bot_manager.gd](scripts/entities/bot_manager.gd)）
 
 - **面板**：`H` 开关，增减 / 清空人机（上限 8，见 `bot_manager.gd` 的 `max_bots`）；
-- **刷新**：在本地玩家周围 **8~18 m** 的随机方向生成（不会刷在脸上），模型从 `assets/models/*/` 现有角色 `.glb` 里随机挑一个（当前 9 个）；
+- **刷新**：在本地玩家周围 **8~18 m** 的随机方向生成（不会刷在脸上），模型从 `assets/models/*/` 现有角色 `.glb` 里随机挑一个（当前 **4 个**）；
 - **AI**：保持 7 m 交战距离（超出就靠近，>15 m 跑步），始终面向玩家，按 `fire_interval`（默认 1.5 s，±35% 随机）射击；
   射击是真实的 raycast（带 `fire_spread_deg` 散布），命中带 `take_damage()` 的碰撞体才扣血（默认 11）；
-- **受击反馈**：后仰（模型旋转）+ 闪白（`material_overlay` 白材质淡出）+ **程序化受击音效**
-  （`_build_hit_sound()`：0.18 s 单声道 16-bit WAV，540→210 Hz 下滑音 + 指数衰减噪声；播放时随机 ±10% 音高）。
+- **受击反馈**：后仰（模型旋转）+ 闪白（`material_overlay` 白材质淡出）+ **受击音效**
+  （从 `sfx/hit_female/` 的 27 条素材池里**每次随机取一条** + 随机音高；素材加载失败时降级为程序化合成音）。
   详见 8.3.1「关于音效：哪些是自带的、哪些要你提供」；
 - **击杀**：被玩家打死 → 倒地后移除、数量自动扣减、击杀日志写入「你 ➤ 人机」；
 - 人机在 `enemy` 组（小地图红点），**仅本端生成、不参与联机同步**（见已知限制）；
@@ -421,29 +509,50 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 
 #### 8.3.1 关于音效：哪些是自带的、哪些要你提供
 
-**结论：受击音效不需要你提供 —— 它已经在代码里程序化合成好了，开箱即用。** 目前全项目所有音效都是「代码合成占位音」，
-没有依赖任何外部音频素材（`music/` 里的 `.ogg` 只用于背景音乐）。
+**结论：受击音效不需要你提供 —— 仓库里已带 27 条真实采样，开箱即用。**
 
 | 音效 | 现状 | 位置 |
 | --- | --- | --- |
-| 人机受击「闷哼」 | ✅ 代码合成（0.18 s 下滑音 + 噪声，播放随机音高） | `bot.gd::_build_hit_sound()` |
+| **受击音（人机 + 玩家共用）** | ✅ **素材池随机**：每次受击从 `sfx/hit_female/` 的 **27 个 wav** 里随机取一条播放（另叠随机音高 0.9~1.15，避免连续受击单调） | `shooting/hit_sounds.gd`（`HitSounds.pick_random()`） |
 | 枪声 / 空仓咔哒 | ✅ 代码合成占位 | `shooting/audio_3d.gd::_build_gunshot() / _build_empty_click()` |
 | 手雷爆炸 | ✅ 代码合成低频冲击 | `shooting/grenade_projectile.gd::_build_boom()` |
 | 背景音乐 | 用户放 `.ogg` 到 `music/` 即可（可选，不放也能玩） | `scripts/music_manager.gd` |
 
-> 注意：**玩家自己被击中时没有「受伤音效」**，只有相机震动（`_camera.add_trauma`）+ HUD 掉血——这是当前的已知缺口。
+**受击素材池的实现要点（`hit_sounds.gd`）**：
 
-**如果你想把占位音换成真实采样**，请按下面的格式提供，我直接接到对应位置：
+- **素材目录**：`res://sfx/hit_female/`（**27 个 `.wav`**）。文件名排序后加载 ⇒ 加载顺序稳定，便于测试复现与诊断。
+  进程内用 `static` 缓存，**只扫一次**。
+- **⚠️ 走 `AudioStreamWAV.load_from_file()` 直读 WAV，而不是靠 Godot 导入资源**：
+  这是**更稳**的一条路 —— 直读不依赖 `.godot/imported/` 缓存是否就绪，
+  所以 **headless / 首次导入前 / 源码直接运行都能出声**。
+  加载分**三级、绝不崩不刷屏**：① `load_from_file()` 直读 → ② 退回 Godot 导入资源 `load()` → ③ 都失败返回 `null`，
+  **由调用方降级**（`bot.gd` 退回程序化合成音；`player.gd` 静音）。
+  > ⚠️ **文档与代码注释的一处历史不一致（如实记录，不自行改代码）**：`hit_sounds.gd` 头部注释写着
+  > 「这些 wav **未被 Godot 导入**（`sfx/` 下没有任何 `.import`）」——
+  > **该说法已不成立**：`sfx/hit_female/` 下现有 **27 个 `.wav.import`**（且已入库），
+  > 说明后来被 Godot 导入过（可能是某次 `--import` 附带导入的）。
+  > **但结论不变、且反而更该保留 `load_from_file()` 作为首选**：它不依赖导入缓存是否可用。
+  > 若要统一口径，需改 `hit_sounds.gd` 的注释（属代码改动，本文档同步任务未做）。
+- **必须用 `preload` 引用 `HitSounds`，不要依赖全局 `class_name`** ——
+  全局类缓存在未开编辑器时可能未注册，headless 会找不到类型（见 `control_checklist §4-17`）。
+- 受击音**玩家与人机共用同一素材池**（`player.gd` / `bot.gd` 各有一路播放节点，但取音来源相同）。
+
+> 注意：**玩家受击音现在有了**（走上面的素材池）；但**受击方向指示**（被打方看到"从哪边来的"）仍是缺口，
+> 见 `adr/ADR-008-remote-health-display.md` 的「后续可能项」。
+
+**如果你想把「代码合成占位音」换成真实采样**（受击音**已换成真实采样**，见上；此处指枪声 / 空仓 / 爆炸），
+请按下面的格式提供：
 
 1. **格式**：优先 **`.ogg`（Ogg Vorbis）**；`.wav`（16-bit PCM）也可以。**不要 `.mp3`**（Godot 可直接用，但有专利/循环兼容问题）。
 2. **规格**：**单声道（mono）**、**44100 Hz**、时长 **0.1–0.5 s**（受击音适合 0.15–0.25 s 的短促声）、
    峰值归一化到 −3 dB 左右即可（代码侧还有 `volume_db` 总音量可调）。
 3. **存放位置与命名**（当前约定，放进 `assets/audio/`，Godot 会自动导入）：
-   - `assets/audio/hit_bot.ogg` —— 人机受击
-   - `assets/audio/hit_player.ogg` —— 玩家受击（新增）
    - `assets/audio/gunshot.ogg` —— 枪声
    - `assets/audio/gunshot_empty.ogg` —— 空仓
    - `assets/audio/grenade_boom.ogg` —— 手雷爆炸
+
+   > **受击音不要往 `assets/audio/` 放**：受击走的是 `sfx/hit_female/` **素材池**（`hit_sounds.gd` 扫描该目录
+   > 下所有 `.wav` 随机取），新增采样直接丢进 `sfx/hit_female/` 即可被自动纳入池子，**无需改代码**。
    文件名不重要，你放好后告诉我实际路径即可，我会改代码里的 `load()` 路径。
 4. **转换命令**（如果手里是 mp3/wav，想统一成 ogg）：
    `ffmpeg -i hit.mp3 -ac 1 -ar 44100 -c:a libvorbis -q:a 5 hit_bot.ogg`
@@ -486,7 +595,8 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 
 ### 阶段 2 剩余的 TODO
 
-- **武器模型**：✅ 全部接入真实模型（M4A4 / 粉色 USP / 蝴蝶刀 / 青花瓷手雷），并支持武器皮肤 + Esc 菜单 3D 检视。
+- **武器模型**：✅ 全部接入真实模型（**AK-47 / USP-S 赛睿 / FPS 蝴蝶刀 / M67 手雷** —— 2026-10-07 精简后每槽 1 个），
+  并支持武器皮肤 + Esc 菜单 3D 检视。⚠️ Esc 菜单的「外观（模型）」变体列表已随之删除（选择冗余）。
 - **枪声素材**：用真实 `.ogg` 枪声替换 `audio_3d.gd::_build_gunshot()` 的程序化占位音。
 - **角色持枪姿态**：人物与武器现已始终朝向准星水平方向（不再随移动键转动）；接入真实模型后可再做上半身朝向混合。
 - **伤害来源**：`PlayerController.take_damage()` 已实现并会触发屏幕震动与血条更新，但场景里暂时没有会还击的敌人。
@@ -583,11 +693,16 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 修复了解析错位 bug：骨骼 flag 只有**高位**带数据（`0x0100/0x0200` 旋转/移动付与、`0x0400` 轴固定、`0x0800` 局部轴、`0x2000` 外部亲、`0x0020` IK 块），
 低位只是布尔标记；另外补上了组形态系数、材质形态字段、关节段 24 个 float。现在 4 个 PMX 全部**精确解析到文件尾**（结束偏移 == 文件大小）。
 
-| 模型 | 解析（剔除野顶点后） | 产物 | Godot 导入验证（headless） |
+> ⚠️ **后续补充（2026-10-07 资源精简）**：下表是**当时的实测记录，原样保留**作为 `pmx2glb.py` 的解析能力证据。
+> 但表中产出的 `miku_navy.glb` / `miku_maid.glb` / `miku_maid2.glb` **三个模型目录（`miku_navy/` / `miku_maid/`）
+> 已全部删除**（合计约 22 MB，从未在最终版本中启用）。**仓库里现在没有任何 PMX 转换模型。**
+> 同批删除的还有 `miku_classic/` 与 `miku_nightcord/`。现存角色见 §三 项目结构。
+
+| 模型 | 解析（剔除野顶点后） | 产物（⚠️ 已删除） | Godot 导入验证（headless） |
 | --- | --- | --- | --- |
-| YYB式改变miku.pmx | 41168 顶点 / 704 骨骼 / 189417 索引 | `miku_navy.glb`（11 MB） | 23 表面 / 704 骨骼 / AABB 高 20.1 / 23 个材质全部有贴图 ✅ |
-| YYB 猫猫女仆.pmx | 61985 顶点 / 922 骨骼 / 285420 索引 | `miku_maid.glb`（11 MB） | 49 表面 / 922 骨骼 / AABB 高 21.1 / 44 个材质有贴图 ✅ |
-| YYB 猫猫女仆2.pmx | 61087 顶点 / 525 骨骼 / 290922 索引 | `miku_maid2.glb`（11 MB） | 52 表面 / 525 骨骼 / AABB 高 21.1 / 48 个材质有贴图 ✅ |
+| YYB式改变miku.pmx | 41168 顶点 / 704 骨骼 / 189417 索引 | `miku_navy.glb`（11 MB）🗑 | 23 表面 / 704 骨骼 / AABB 高 20.1 / 23 个材质全部有贴图 ✅ |
+| YYB 猫猫女仆.pmx | 61985 顶点 / 922 骨骼 / 285420 索引 | `miku_maid.glb`（11 MB）🗑 | 49 表面 / 922 骨骼 / AABB 高 21.1 / 44 个材质有贴图 ✅ |
+| YYB 猫猫女仆2.pmx | 61087 顶点 / 525 骨骼 / 290922 索引 | `miku_maid2.glb`（11 MB）🗑 | 52 表面 / 525 骨骼 / AABB 高 21.1 / 48 个材质有贴图 ✅ |
 | RM/Frilly Ankle Boots_White.pmx | 4292 顶点 / 14 骨骼 | （仅验证解析，未使用） | — |
 
 - 贴图按**实际文件**去重内嵌（同一个模型里的 `tex/body.png` 与 `tex\body.png` 只嵌一次），体积 90 MB → 32 MB；
@@ -604,7 +719,7 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 | 按 `Esc` 打开菜单 / 再按关闭；菜单打开时屏蔽输入、释放鼠标 | ✅ |
 | 按 `H` 打开人机面板；面板打开时按 `Esc` 关闭（校验了 project.godot 的输入映射） | ✅ |
 | 菜单 / 人机面板互斥（打开一个自动关掉另一个） | ✅ |
-| 角色列表扫描到 4 个 glb；点击切换后本地玩家模型重载成功（miku_navy） | ✅ |
+| 角色列表扫描到 4 个 glb；点击切换后本地玩家模型重载成功（miku_navy，⚠️ 该模型 2026-10-07 已删除） | ✅ |
 | 玩家阵亡 → 死亡界面显示 + 屏蔽输入；重生 → 回满血、回出生点（距离 0.00 m）、输入恢复 | ✅ |
 | 人机刷新在玩家周围 8~18 m、在 enemy 组、复用 MikuModel + rifle 外观 + 受击音效节点 | ✅ |
 | 人机受击：闪白 + 后仰生效 | ✅ |
@@ -618,28 +733,38 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 
 ### 阶段 5 补充：真实武器模型移植 + 模型朝向修正（headless + 离屏渲染实测 28 项）
 
+> ⚠️ **后续补充（2026-10-07 资源精简）**：本节及下面两节（阶段 2/4 蝴蝶刀、阶段 2 武器外观）记录的是
+> **当时的实测过程，原样保留**作为校准方法论的证据。其中提到的 **M4A4 / 粉色 USP / 青花瓷手雷 /
+> `butterfly_knife.glb`（hudidao）/ 小海军 / 猫猫女仆** 等模型**已全部删除**。
+> **当前武器每槽只有 1 个变体**：`ak47`（Rifle）/ `usp_cyrex`（USP）/ `knife_fps`（Knife）/ `grenade_pubg`（Grenade）
+> —— 见 §6.4 与 `weapon_variant.gd::VARIANTS`。
+> ⚠️ 另注：这些行里记的"USP 用 `trim` 裁掉枪口侧 4 组浮空小圈"**已被证明是错的**（那 4 组其实是消音器的环形分段，
+> 裁掉等于把枪管切了），`trim` 已删除 —— 详见 `weapon_variant.gd` 的 USP 注释。
+
 | 项目 | 结果 |
 | --- | --- |
 | rifle / usp / grenade 场景改成「`Model` 子节点 + 真实 glb」（从 feat 分支移植） | ✅ |
-| M4A4：长 0.897 m、1 个材质带贴图、`Muzzle` 正好在枪口（z=0.557） | ✅ |
-| 粉色 USP：长 0.193 m、24 个表面全部有贴图 | ✅ |
-| 青花瓷手雷：长 0.067 m、贴图正常（glb 里原本缺 `material` 引用，已修补，`obj2glb.py` 也修了） | ✅ |
-| 武器槽 1~4 装备正常；M4A4 开火消耗弹药（30 → 23） | ✅ |
+| M4A4：长 0.897 m、1 个材质带贴图、`Muzzle` 正好在枪口（z=0.557）🗑 已删除 | ✅ |
+| 粉色 USP：长 0.193 m、24 个表面全部有贴图 🗑 已删除 | ✅ |
+| 青花瓷手雷：长 0.067 m、贴图正常（glb 里原本缺 `material` 引用，已修补，`obj2glb.py` 也修了）🗑 已删除 | ✅ |
+| 武器槽 1~4 装备正常；M4A4 开火消耗弹药（30 → 23）🗑 模型已删除 | ✅ |
 | 人机刷新 / 菜单 / 重生等阶段 5 功能回归通过 | ✅ |
-| 3 个 PMX 模型朝向修正：脚尖在足首的 +Z（Δz≈+2.1），离屏渲染确认正面朝向镜头 | ✅ |
+| 3 个 PMX 模型朝向修正：脚尖在足首的 +Z（Δz≈+2.1），离屏渲染确认正面朝向镜头 🗑 模型已删除 | ✅ |
 
 > 朝向问题是本轮新发现的：PMX 原文件面朝 **-Z**，与项目约定（+Z）相反（用离屏渲染才看出来——人物背对镜头）。
-> 修复过程见下一节（最终定稿为「只取反 Z」）。
+> 修复过程见下一节（最终定稿为「只取反 Z」）。**该结论今天仍然有效**，`pmx2glb.py` 的换轴逻辑未变。
 
 **自动缩放修复（人机 / 角色选择都会用到）**：小海军模型把物理骨骼放在离身体很远的位置（前髪先 Y≈-74、パンツ Y≈+100），
 `MikuModel` 按骨骼量身高会得到 155 单位 → 自动缩放后变成 0.23 m 的玩偶（人机随机选中时肉眼可见）。
 `_measure_bounds` 改为「网格 AABB 与骨骼包围盒各算一份、取更矮的」，小海军恢复 ~1.7 m；离屏实拍主模型 / 小海军 / 猫猫女仆尺寸一致。
+> ⚠️ 小海军 / 猫猫女仆模型已删除（2026-10-07），但**这段 `_measure_bounds` 修复逻辑保留在 `miku_model.gd` 里**，
+> 且**对现存模型仍然生效** —— 遇到「物理骨骼离身体很远」的模型仍需要它。
 
 ### 阶段 2 / 4 补充：蝴蝶刀 + 武器皮肤 + 3D 检视 + 握持 / 第一人称 / 左右镜像修复（headless + 离屏渲染实测 46 项）
 
 | 项目 | 结果 |
 | --- | --- |
-| 蝴蝶刀接入真实模型（`butterfly_knife.glb`，长 0.279 m、表面带贴图） | ✅ |
+| 蝴蝶刀接入真实模型（`butterfly_knife.glb`，长 0.279 m、表面带贴图）🗑 该模型已删除（现用 `knife_fps.glb`） | ✅ |
 | 伽玛多普勒皮肤贴图程序化生成（256×256）、套到 M4A4 网格、切回原版后材质清理 | ✅ |
 | 皮肤立即生效（第三人称手上的枪同步换色） | ✅ |
 | 3D 检视：Esc 菜单 SubViewport 显示所选武器 + 皮肤（M4A4 默认 / 伽玛多普勒、蝴蝶刀 伽玛多普勒 / 渐变之色、手雷 蓝钢 都拍图确认） | ✅ |
@@ -660,6 +785,7 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 
 > 验收截图（离屏渲染实拍）存在 [`docs/acceptance/`](docs/acceptance/)：面部特写（主模型 / 小海军）、第三人称握持（小海军 / 猫猫女仆）、
 > 第一人称武器（步枪 / 蝴蝶刀）、Esc 菜单总览 + 各皮肤 3D 检视（伽玛多普勒 / 渐变之色 / 蓝钢）。
+> ⚠️ 截图中涉及的小海军 / 猫猫女仆 / M4A4 / 蝴蝶刀模型**已删除**，截图仅作历史留档，**不是当前外观**。
 
 > 验证用的临时脚本（`tools/_tmp_*`）已在验证完成后删除，仓库里只留项目文件与正式工具（`pmx2glb.py` / `obj2glb.py` / `blend2glb.py`）。
 
@@ -673,7 +799,7 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 | `miku_ps` / `miku_statue` 判定：`hatsune_miku.glb` = 60 mesh + 1 skin + 532 joint → **miku_ps**；`miku.glb` = 18 mesh + 无骨骼 + 8 贴图 → **miku_statue**（与 HANDOFF 特征一致） | ✅ |
 | **USP-S 赛睿**：旧值前后反（文件 +X 被映到 +Z）+ 偏小（scale 按含离群几何的 1782 算） | 已修复 |
 | USP 校准后：武器空间 `z -0.110~0.110`（枪长 **0.220 m**）、对中（中心 ≈ 0,0,0）、Muzzle z=0.10 落在 +z 端内侧 | ✅ |
-| USP 枪口侧 4 组浮空小圈（和枪身同 surface）用 `trim`（本地 `z ≤ 11`）裁掉，保留 11311 / 11985 三角形 | ✅ |
+| USP 枪口侧 4 组浮空小圈（和枪身同 surface）用 `trim`（本地 `z ≤ 11`）裁掉，保留 11311 / 11985 三角形 ⚠️ **该结论已被推翻，见上方补充说明，`trim` 已删** | ✅ |
 | **FPS 蝴蝶刀**：旧值偏小到 1/5（scale 0.15 是按混进来的 1.669 m 手臂 `Object_65` 算的） | 已修复 |
 | FPS 蝴蝶刀校准后：`hide` 删掉 `Object_65` 手臂，武器空间 `z -0.140~0.140`（刀长 **0.280 m**）、对中、刀尖在 +Z | ✅ |
 | 蝴蝶刀踩坑：glTF 内层链已把刀摆成 +Z，再套旋转基等于转 90°（刀躺到 +Y）→ 改为**纯缩放 + 对中** | ✅ |
@@ -688,8 +814,10 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 >    工具里顺带把采样从 `global_transform` 改成沿父链累积**本地**变换（headless 下没走帧，`global_transform` 还是单位阵）。
 
 > 验收截图（离屏渲染实拍）已补进 [`docs/acceptance/`](docs/acceptance/)：第一人称 USP-S 赛睿 / FPS 蝴蝶刀 / AK-47、
-> 第三人称 USP-S 赛睿、旧外观回归（hudidao 蝴蝶刀 / M4A4）、Esc 菜单外观列表 + 3D 检视、miku_ps / miku_statue。
+> 第三人称 USP-S 赛睿、旧外观回归（hudidao 蝴蝶刀 / M4A4 🗑 均已删除）、Esc 菜单外观列表 + 3D 检视、miku_ps / miku_statue。
 > 本轮临时探针脚本（`_probe_*.gd`）已删除；`tools/weapon_variant_check.tscn` 与 `tools/capture_acceptance.tscn` 是**长期保留**的正式工具。
+> ⚠️ **Esc 菜单的「外观（模型）」变体列表已于 2026-10-07 删除**（每槽只剩 1 个变体，选择冗余），
+> 见 `game_menu.gd` 头部注释与 `control_checklist.md` §2。截图里的"外观列表"不再存在于当前 UI。
 
 ### 阶段 5 补充：趴下姿态修正 + 逐模型朝向补正（窗口模式离屏渲染实测）
 
@@ -724,6 +852,10 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 > 音效确认：受击音效**不需要外部素材**（见 8.3.1），所有音效均为代码程序化合成；想换真实采样时的格式与放置约定也写在 8.3.1。
 
 ### 阶段 4 补充：接入 cat_hatsune_miku / miku_classic + 程序化待机微动作（窗口模式离屏渲染 + 数值实测）
+
+> ⚠️ **后续补充（2026-10-07 资源精简）**：`miku_classic` **已删除**（连同 `miku_navy` / `miku_maid` /
+> `miku_nightcord`，共 9 个模型目录被精简）。`cat_hatsune_miku` **保留**，且已成为 UAL 重定向的**目标骨架**。
+> 下表原样保留作为方法论与踩坑记录；「9 个模型」等数字是**当时**的，**当前是 4 个**（见 §三）。
 
 这一轮做两件事：**接入两个新模型**，以及**为 miku_statue 重做一套更流畅的待机动作**（顺带对所有模型生效）。
 
@@ -810,9 +942,18 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 - [x] 无动画模型自动启用程序化步态：放下 T-pose（手 1.39 m → 0.91 m）；行走循环含屈膝抬脚（0.17 m）、步幅 0.89 m、身体起伏，步频与速度匹配（走 2.0 Hz / 跑 2.7 Hz，基本不滑步）
 - [x] 程序化**待机微动作**（`miku_idle_motion.gd`）：呼吸起伏 + 重心微移 + 上身摆动，正弦 + 交叉频率无循环接缝；幅度 / 频率按模型目录名在 `IDLE_PROFILES` 配（`miku_statue` 单独调强）
 - [x] 逐模型**展示台道具清理**（`MODEL_STRIP_PROPS`）：清掉 Sketchfab 导出带进来的 Stage 地面 / 灯光 / 投影片
-- [x] 接入 `cat_hatsune_miku`（自带 idle 剪辑）与 `miku_classic`（程序化姿态兜底）+ 朝向补正 `180°`
-- [ ] 给模型补真实动画剪辑（程序化姿态只是兜底，动作较生硬）；骨骼名是损坏编码，武器未自动挂手
-- [ ] 场景观感：把程序化云层换成更接近 sky.jpeg 的云层贴图 / HDRI（可选）
+- [x] 接入 `cat_hatsune_miku`（标准骨架 + 自带 idle 剪辑；**现为 UAL 重定向的目标骨架**）
+- [x] **接入 Quaternius UAL 动画库**（`assets/animations/ual/AnimationLibrary_Godot_Standard.glb`，46 条剪辑）做
+      **locomotion**（腿 + 躯干 + 空手手臂），默认开启（`ual_locomotion_enabled = true`）；
+      蹲姿走 `Crouch_Fwd`（`Crouch_Idle` 腿角仅 10.8° 会滑步）；
+      `ual_sprint_threshold = 1.1` ⇒ **冲刺档故意够不到 `Sprint`**（防双马尾穿帮）
+- [x] **修复 T-pose 与轻微抽搐**（真根因：0.08 s 的 T-pose 定格剪辑被设成 12 Hz 循环 ⇒ 每秒重写全身骨骼 12 次）。
+      新增**退化剪辑判据**（时长 < 0.2 s **且** 会动骨轨占比 < 15%）⇒ 退化剪辑不设 `LOOP_LINEAR`、不 `play()`
+- [x] 修复后**反转了 3 条把 bug 当期望的测试断言**（原断言把「T-pose 不动」写成期望行为）
+- [x] 受击音效改为 **`sfx/hit_female/` 27 条素材池**（每次受击随机取一条 + 随机音高，`AudioStreamWAV.load_from_file()` 直读）
+- [ ] 给模型补**更多**真实动画剪辑（UAL 只覆盖 locomotion；射击 / 换弹 / 倒地等仍靠程序化与 IK）
+- [ ] `WeaponHoldIK`（持枪双臂贴合）与 `HandGripModifier`（手指抓握）已实现但**默认关闭**，待调稳后开启
+- [ ] 场景观感：程序化云层可再调（**原参考图 `sky.jpeg` 已删除**，如需照片级观感要另找 HDRI）
 
 ### 操作与装备（补充）
 
@@ -825,6 +966,8 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 
 - [x] `scenes/ui/game_menu.tscn` + `game_menu.gd`：Esc 菜单（角色选择扫描 `assets/models/*/*.glb`、退出游戏先退房间）
 - [x] 菜单打开时释放鼠标并屏蔽移动 / 跳跃 / 开火 / 开镜（换弹计时继续），关闭后恢复并重新锁定鼠标
+- [x] ⚠️ 菜单右栏的**「外观（模型）」变体选择列表已删除**（每槽只剩 1 个变体，选择冗余）；
+      **武器皮肤（WeaponSkin）选择保留**，`WeaponVariant` 仍在菜单之外按默认变体自动套用
 - [x] `scenes/ui/death_screen.tscn` + `death_screen.gd`：`died` → 「你已阵亡」+ 重生（回满血 / 回出生点 / 恢复输入）
 - [x] `scenes/bot.tscn` + `bot.gd` + `bot_manager.gd` + `bot_panel.tscn`：H 面板增减人机、8~18 m 随机刷新、
       追踪 + 周期射击（散布 / 伤害可调）+ 受击后仰 / 闪白 / 程序化音效 + 倒地移除
@@ -846,10 +989,17 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 
 - 尚未放入 `miku.glb` 时角色仍是占位胶囊；场景里没有道具 / 靶子 / 队友，也没有胜负设计
   （阶段 5 的人机是练习对手，不是正式的敌人 AI 与关卡设计）。
-- 当前 `miku.glb` 没有动画剪辑，行走 / 跑步由「程序化步态」合成（屈膝、起伏、自适应步频，基本不滑步），
-  观感自然但没有转身 / 急停之类的过渡动作；骨骼名是损坏编码，武器挂手靠几何启发式识别手腕（已可用，必要时用 `hand_offset` 微调）。
-- 3 个 PMX 转换模型（小海军初音 / 猫猫女仆 ×2）同样没有动画剪辑、走程序化步态；MMD 的卡通贴图（toon）与球面贴图（spa）未参与渲染，
-  只有漫反射贴图 + 材质基础色，观感比 MMD 里"平"一些。
+- 当前 `miku.glb`（默认模型）**没有可用动画剪辑**，且它的 **554 根骨骼名是乱码 MMD 名** ⇒ 武器挂手靠几何启发式识别手腕
+  （已可用，必要时用 `hand_offset` 微调）。**`cat_hatsune_miku` 是标准骨架**，UAL 重定向与 IK 都以它为基准。
+- **⚠️ 2026-10-07 资源精简**：原先的 9 个模型目录已删到 **4 个**（`miku` / `cat_hatsune_miku` / `miku_ps` / `miku_statue`），
+  删掉的包括全部 PMX 转换模型（`miku_navy` / `miku_maid`×2）与 `miku_classic` / `miku_nightcord`。
+  ⇒ 代价：**MMD 卡通 / toon 观感的多样性没了**，现只剩 4 个模型可切换（Esc 菜单角色列表相应变短）。
+- **动作覆盖仍不全**：UAL 只补上了 **locomotion**（走 / 跑 / 蹲 / 跳）；
+  射击、换弹、上膛、倒地、复活等**仍靠程序化姿态 + IK 近似**，不是逐武器的真实动画。
+  `Pistol_Shoot` / `Death01` 等 UAL 射击与死亡剪辑**与本项目的武器 / 双马尾冲突**，评估结论见
+  `docs/architecture/ual_retarget_evaluation.md` §3.3 / §3.4。
+- **冲刺档故意「够不到」`Sprint`**（`ual_sprint_threshold = 1.1`）⇒ 冲刺时 UAL 仍走 walk 档，
+  冲刺感由程序化层加幅度补。这是**为防双马尾穿帮**的有意选择，不是 bug。
 - 武器只跟随准星的水平方向，尚未跟随俯仰角度；上下半身分层朝向留待真实模型阶段。
 - 联机为**基础版**：最多 4 人；没有断线重连、队伍/兵种/胜负；远端玩家的后坐力与镜头震动动画不显示（只同步位置与朝向）。
 - 玩家位置同步走普通 RPC（~30Hz + 本端平滑），局域网够用；没有服务器回滚 / 延迟补偿，高延迟下会有轻微抖动。
@@ -862,25 +1012,33 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
   人机对玩家的伤害同样只在本端结算（玩家武器打人机时也跳过了联机 RPC）。
 - 角色选择（Esc 菜单）只影响**本端玩家自己**的外观，不会同步给其他玩家。
 - 菜单 / 死亡界面 / 人机面板打开时**游戏不暂停**（人机照常行动），没有暂停 / 观战功能。
-- M4A4 是从 Source 2 的「第一人称视模型」转出来的：模型里还留着 43 个手部 / 手指空骨骼节点（不参与蒙皮、不影响显示），
-  枪身 0.90 m 偏长，握持位置没有逐模型调过，必要时用 `MikuModel.hand_offset` 或武器场景里微调。
-- **武器外观校准情况**：AK-47（0.88 m）、M4A4（0.90 m）、**USP-S 赛睿（0.22 m）**、**FPS 蝴蝶刀（0.28 m）**、
-  PUBG / 青花瓷手雷均已对齐武器空间约定（+Z 枪口、对中、Muzzle 在 +z 端内侧）。**仍有遗留**：
-  - `hudidao` 蝴蝶刀（`butterfly_knife.glb`）**尚未校准**：它是 4 个 mesh、每个 mesh 内层旋转都不同的老资产，
-    现在的摆放没对中、刀身也不在 +Z（工具实测武器空间 `x 0.022~0.301 / z -0.141~-0.110`）。留着做回归用，真要修得逐个 mesh 量内层链。
-  - USP-S 赛睿的**枪口侧 4 组浮空小圈**是靠 `trim`（本地 `z ≤ 11`）裁掉的，属于对 Sketchfab 导出瑕疵的**针对性补丁**；
-    若以后换模型 / 重导，需要重新量一次离群几何的边界。
+- M4A4 曾是从 Source 2 的「第一人称视模型」转出来的（⚠️ **该模型 2026-10-07 已删除**，Rifle 槽现用 `ak47.glb`）：
+  当年测得它带 43 个手部 / 手指空骨骼节点、枪身 0.90 m 偏长。留意这类"第一人称视模型转出的武器"通常偏长，
+  换枪时用 `tools/weapon_variant_check.tscn` 量一遍武器空间包围盒。
+- **第三人称握持已有 IK，但默认关闭**：`WeaponHoldIK`（持枪时接管双臂贴枪身，`hold_ik_enabled = false`）与
+  `HandGripModifier`（手指抓握，`hand_grip_enabled = false`）均已实现、默认关闭；
+  开启后**手臂才真正贴合枪身**，否则仍是「挂点跟手骨」——姿势只是接近，不是逐武器的持枪动画。
+- **武器外观校准情况（2026-10-07 精简后：每槽 1 个变体）**：
+  `ak47`（Rifle，0.88 m）/ `usp_cyrex`（USP-S 赛睿，0.41 m 含消音器）/ `knife_fps`（FPS 蝴蝶刀，0.28 m）/
+  `grenade_pubg`（M67 手雷）均已对齐武器空间约定（+Z 枪口、对中、Muzzle 在 +z 端内侧）。
+  - **Esc 菜单的变体选择 UI 已删除**（每槽只剩 1 个，选择冗余）；`WeaponVariant` 仍在装备时按默认变体自动套用。
+    将来要恢复多外观，需同时改回 `game_menu.gd` 的列表与本条。
+  - `m4a4.glb` / `pink_pistol.glb` / `butterfly_knife.glb`（hudidao）/ `porcelain_grenade.glb` **已删除**。
+    原"hudidao 尚未校准"那条遗留随之作废（资产已不存在）。
+  - **USP-S 的 `trim` 已删除**：曾按"裁掉枪口侧 4 组浮空小圈"处理，后被渲染对比 + 探针实测**证伪** ——
+    那 4 组其实是**消音器上的环形分段**，裁掉等于把消音器与枪管前端齐刷刷切掉（看着像"没有枪管"）。
+    现整枪（含消音器）完整保留，长度 0.4135 m 正是 USP-S 的真实长度。
   - 第一人称 `view_offset` 是**逐外观手调**的（刀短所以比枪贴近镜头），不是自动取景；换新外观要重新对一次。
-- 第三人称握持是「挂点跟手骨」（不悬空、走路跟手），但手臂没有 IK 去贴合枪身 —— 拿刀 / 拿枪的姿势只是接近，不是逐武器的持枪动画。
+- 第三人称握持是「挂点跟手骨」（不悬空、走路跟手）；启用 `WeaponHoldIK` 后手臂才会 IK 贴合枪身（见上）。
 - 第一人称是「相机空间视图模型」（`view_offset` 摆放，开镜收向中心），没有做逐武器的 FOV / 抖动 / 换弹动画。
 - 角色列表靠扫描 `res://assets/models/*/*.glb` 生成（自动跳过 `weapons/` 武器目录）；导出发行版时如果 `.glb` 不随包导出，需要改成固定列表（目前只在源码运行下验证）。
 - `music/` 只在启动时扫描一次，运行中加歌需要重启；`reload_playlist()` 已备好接口。
 - 反射探针为 `Once` 模式，场景静态物体变化后需要手动重新烘焙。
 - **朝向补正是逐模型手登记的**：只有「和项目约定（+Z）相反」的模型才需要在 `MikuModel.MODEL_YAW_CORRECTION` 里
-  加一条（目前 `miku_statue → 180°`、`miku_classic → 180°`）。新模型放进 `assets/models/<目录>/` 后，先做一次朝向实拍（相机放在模型
-  **自己的 +Z** 前面，看到脸才对），确认方向再决定要不要登记，不要盲目补 180°。
+  加一条（目前 `miku_statue → 180°`；原先的 `miku_classic → 180°` 随该模型删除已注释掉）。新模型放进 `assets/models/<目录>/` 后，
+  先做一次朝向实拍（相机放在模型**自己的 +Z** 前面，看到脸才对），确认方向再决定要不要登记，不要盲目补 180°。
 - **展示台道具清单也是逐模型手登记的**（`MODEL_STRIP_PROPS`）：只有确认「自带的舞台 / 灯光 / 地面 / 投影片」确实不该出现在游戏里，
-  才把关键字加进去。判据 = 渲染出来不是角色的一部分（`miku_classic` 的白板地面、`cat_hatsune_miku` 的一块平面）。
+  才把关键字加进去。判据 = 渲染出来不是角色的一部分（`cat_hatsune_miku` 的一块平面；带白板地面的模型已删除）。
   注意 `miku.glb` 自带的 `Light` / `Camera` **不能**删（既有功能在用），所以这张表是白名单式的、不是全局按名字黑名单。
 - **待机微动作是纯程序化的整体位移 / 旋转**（作用在 `IdleMotion` 这一层），**不是骨骼级动画**：
   对无骨骼无动画的模型（`miku_statue`）效果最明显；对有自带动画的模型只是轻微叠加（默认幅度 = 睡眠般的微弱呼吸，

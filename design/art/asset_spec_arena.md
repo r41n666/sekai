@@ -27,7 +27,7 @@
 
 ### 1.1 现场景风格基线（实拍确认，非臆测）
 
-我实看了 `docs/acceptance/` 的截图（`facing_miku_front.jpg` / `third_person_rifle_m4a4.jpg` / `char_miku_ps.jpg`）与参考图 `assets/environments/sky.jpeg`，确认当前画面：
+我实看了 `docs/acceptance/` 的截图（`facing_miku_front.jpg` / `third_person_rifle_m4a4.jpg` / `char_miku_ps.jpg`）与参考图 `assets/environments/sky.jpeg`（⚠️ **该参考图已于 2026-10-07 删除**；观感目标保留、实现改为程序化天空），确认当前画面：
 
 | 要素 | 现状值 | 观感 |
 | --- | --- | --- |
@@ -60,11 +60,20 @@
 
 扫描 `assets/` 全目录（`find`/`rg` 实测）：
 
+> ⚠️ **后续补充（2026-10-07 资源精简）**：下表是**当时的扫描结果，原样保留**作为"当时有什么"的记录。
+> 现状：**环境只余 `high_quality_environment.tres`（程序化天空，零外部贴图）**；
+> 角色**从 9 目录 / 10 glb 精简到 4 个**（`miku` / `cat_hatsune_miku` / `miku_ps` / `miku_statue`）；
+> 武器**从 9 个精简到 4 个、每槽 1 个**（`ak47` / `usp_cyrex` / `knife_fps` / `grenade_pubg`）。
+> `sky.jpeg`（参考图）、`grasslands_sunset_4k.hdr`（25 MB 备选 HDRI，从未启用）及
+> `miku_navy` / `miku_maid`×2 / `miku_classic` / `miku_nightcord` 与
+> `m4a4` / `pink_pistol` / `butterfly_knife` / `porcelain_grenade` **均已删除**。
+> ⇒ **掩体 / 道具仍为 0**，本文件的"全部用 Godot 原生图元现场搭建"结论**不变、且更该遵守**。
+
 | 类别 | 现有内容 | 数量 | 能否用于竞技场 |
 | --- | --- | --- | --- |
-| 环境 | `high_quality_environment.tres`、`grasslands_sunset_4k.hdr`（未启用）、`sky.jpeg`（参考图，非贴图） | 3 | ✅ 沿用环境与天空，**不改** |
-| 角色模型 | `miku` / `miku_navy` / `miku_maid`(×2 glb) / `miku_ps` / `miku_statue` / `miku_classic` / `cat_hatsune_miku` / `miku_nightcord` | 9 目录 / 10 glb | ✅ 角色复用（已有管线），**本次不动模型** |
-| 武器模型 | `ak47` / `m4a4` / `usp_cyrex` / `pink_pistol` / `butterfly_knife` / `knife_fps` / `grenade_pubg` / `porcelain_grenade` / `hudidao` | 9 | ✅ 已接入，**本次不动** |
+| 环境 | `high_quality_environment.tres`、`grasslands_sunset_4k.hdr`（未启用 🗑 已删除）、`sky.jpeg`（参考图，非贴图 🗑 已删除） | 3 → **1** | ✅ 沿用环境与天空，**不改** |
+| 角色模型 | `miku` / `miku_navy`🗑 / `miku_maid`(×2 glb)🗑 / `miku_ps` / `miku_statue` / `miku_classic`🗑 / `cat_hatsune_miku` / `miku_nightcord`🗑 | 9 目录 / 10 glb → **4 目录 / 4 glb** | ✅ 角色复用（已有管线），**本次不动模型** |
+| 武器模型 | `ak47` / `m4a4`🗑 / `usp_cyrex` / `pink_pistol`🗑 / `butterfly_knife`🗑 / `knife_fps` / `grenade_pubg` / `porcelain_grenade`🗑 / `hudidao`🗑 | 9 → **4** | ✅ 已接入，**本次不动** |
 | 贴图 | `assets/models/textures/*`（M4A4 的 ORM / 法线等） | 若干 | ⚪ 武器专用，掩体**不用** |
 | **掩体 / 道具 / 障碍物 / 箱子 / 墙** | **无** | **0** | ❌ **完全没有**——搜索 `*prop*/*obstacle*/*cover*/*crate*/*box*` 结果为空 |
 
