@@ -83,8 +83,9 @@ const STANCE_HEIGHTS := [1.8, 1.2, 0.8]
 const STANCE_CAMERA_Y := [1.6, 1.05, 0.35]
 const STANCE_SPEED_SCALE := [1.0, 0.5, 0.25]
 
-## 受击音效路径（玩家与敌人共用同一素材；与 bot.gd 一致）
-const HIT_SOUND_PATH := "res://sfx/hit_female/hit_f_01.wav"
+## 受击音效：**每次受击从 `sfx/hit_female/` 的素材池里随机取一条**播放（与 bot.gd 同一素材池）。
+## ⚠ 必须用 preload 引用，不能依赖全局 `class_name`（control_checklist §4-17 类缓存坑）。
+const HitSounds := preload("res://scripts/shooting/hit_sounds.gd")
 ## 受击音的随机音高范围（连续受击不单调）
 const HIT_PITCH_MIN := 0.9
 const HIT_PITCH_MAX := 1.15
@@ -186,32 +187,28 @@ func _setup_remote_player() -> void:
 		placeholder.material_override = material
 
 
-## 受击音节点（玩家侧新增）：3D 播放，位置跟随玩家，受击时由 `take_damage` 触发。
-## 素材 = `sfx/hit_female/hit_f_01.wav`（与 bot.gd 同款）。
+## 受击音节点（玩家侧原本没有，被敌人打中是静音的）：3D 播放，位置跟随玩家。
+## 素材**不在这里固定** —— 每次受击由 `_play_hit_sound()` 从 `HitSounds` 素材池随机取一条。
 func _setup_hit_audio() -> void:
 	_hit_audio = AudioStreamPlayer3D.new()
 	_hit_audio.name = "HitAudio"
 	_hit_audio.unit_size = 8.0
 	_hit_audio.max_distance = 60.0
 	_hit_audio.volume_db = hit_sound_db
-	_hit_audio.stream = _load_hit_sound()
 	add_child(_hit_audio)
 
 
-## 加载受击音（多级降级，绝不崩、不报错刷屏）：
-##   ① `AudioStreamWAV.load_from_file` **直读 WAV** —— headless / 未导入 / 源码运行都能出声；
-##   ② 退回 Godot 导入资源（编辑器 / 导出包）；③ 都失败 → 返回 null（**静音**，即玩家侧的原始行为）。
-func _load_hit_sound() -> AudioStream:
-	if FileAccess.file_exists(HIT_SOUND_PATH):
-		var direct := AudioStreamWAV.load_from_file(HIT_SOUND_PATH)
-		if direct != null:
-			return direct
-	if ResourceLoader.exists(HIT_SOUND_PATH):
-		var imported := load(HIT_SOUND_PATH)
-		if imported is AudioStream:
-			return imported
-	push_warning("Player：受击音 %s 加载失败，玩家受击将静音" % HIT_SOUND_PATH)
-	return null
+## 每次受击调用：**随机**取一条素材播放。
+## 素材池为空（目录不存在 / 全部加载失败）时 `stream` 保持 null → 静默跳过（降级）。
+func _play_hit_sound() -> void:
+	if _hit_audio == null:
+		return
+	var stream: AudioStream = HitSounds.pick_random()
+	if stream == null:
+		return # 降级：素材不可用 ⇒ 静音（玩家侧原始行为）
+	_hit_audio.stream = stream
+	_hit_audio.pitch_scale = randf_range(HIT_PITCH_MIN, HIT_PITCH_MAX)
+	_hit_audio.play()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -533,10 +530,9 @@ func take_damage(amount: float, _source: Node = null) -> void:
 	#   （control_checklist §4-9 同源纪律）。
 	_model.play_hit()
 	# 受击音（玩家侧原本没有，被敌人打中是静音的）：与受击动作同一权威判定点；
-	# 随机音高（0.9~1.15）避免连续受击单调。素材加载失败时 stream=null → 静默跳过（降级）。
-	if _hit_audio != null and _hit_audio.stream != null:
-		_hit_audio.pitch_scale = randf_range(HIT_PITCH_MIN, HIT_PITCH_MAX)
-		_hit_audio.play()
+	# **每次随机**从 `sfx/hit_female/` 素材池取一条；随机音高（0.9~1.15）避免连续受击单调。
+	# 素材不可用时静默跳过（降级）。
+	_play_hit_sound()
 	if health <= 0.0:
 		_model.play_death()
 		died.emit()

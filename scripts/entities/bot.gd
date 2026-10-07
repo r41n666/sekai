@@ -40,8 +40,10 @@ signal died_bot(bot: Node)
 @export var hit_flash_alpha := 0.8
 @export var hit_sound_db := -8.0
 
-## 受击音效路径（玩家与敌人**共用同一素材**：用户要求"受击音效只用 sfx 里的 hit_f_01.wav"）
-const HIT_SOUND_PATH := "res://sfx/hit_female/hit_f_01.wav"
+## 受击音效：**每次受击从 `sfx/hit_female/` 的素材池里随机取一条**播放
+## （用户要求「每次有攻击触发随机选择一个播放」）。
+## ⚠ 必须用 preload 引用，不能依赖全局 `class_name`（control_checklist §4-17 类缓存坑）。
+const HitSounds := preload("res://scripts/shooting/hit_sounds.gd")
 ## 受击音的随机音高范围（连续受击不单调）
 const HIT_PITCH_MIN := 0.9
 const HIT_PITCH_MAX := 1.15
@@ -183,8 +185,7 @@ func take_damage(amount: float, _source: Node = null) -> void:
 	health = maxf(health - amount, 0.0)
 	_flash_alpha = hit_flash_alpha
 	_lean = hit_lean
-	_hit_audio.pitch_scale = randf_range(HIT_PITCH_MIN, HIT_PITCH_MAX)
-	_hit_audio.play()
+	_play_hit_sound()
 	_model.play_hit()
 	if health <= 0.0:
 		_model.play_death()
@@ -255,33 +256,36 @@ func _collect_meshes(node: Node) -> Array[MeshInstance3D]:
 	return out
 
 
-## 受击音效：优先用真实采样 `sfx/hit_female/hit_f_01.wav`；加载失败时**静默降级**到程序化合成音。
+## 受击音效节点。素材**不在这里固定** —— 每次受击由 `_play_hit_sound()` 从
+## `HitSounds` 素材池随机取一条并挂到 `.stream`（用户要求随机播放）。
 func _setup_hit_audio() -> void:
 	_hit_audio = AudioStreamPlayer3D.new()
 	_hit_audio.name = "HitAudio"
 	_hit_audio.unit_size = 8.0
 	_hit_audio.max_distance = 60.0
 	_hit_audio.volume_db = hit_sound_db
-	_hit_audio.stream = _load_hit_sound()
+	_hit_audio.stream = _fallback_hit_sound() # 预置降级音，避免首次受击前 stream 为空
 	add_child(_hit_audio)
 
 
-## 加载受击音（多级降级，绝不崩、不报错刷屏）：
-##   ① `AudioStreamWAV.load_from_file` **直读 WAV** —— headless / 未导入 / 源码运行都能出声
-##      （该 wav 无需 Godot 导入器；`sfx/` 下本就无 `.import`）；
-##   ② 退回 Godot 导入资源（编辑器 / 导出包里的 `load()`）；
-##   ③ 仍失败 → 退回 `_build_hit_sound()` 程序化合成音（保证人机永远有受击反馈）。
-func _load_hit_sound() -> AudioStream:
-	if FileAccess.file_exists(HIT_SOUND_PATH):
-		var direct := AudioStreamWAV.load_from_file(HIT_SOUND_PATH)
-		if direct != null:
-			return direct
-	if ResourceLoader.exists(HIT_SOUND_PATH):
-		var imported := load(HIT_SOUND_PATH)
-		if imported is AudioStream:
-			return imported
-	push_warning("Bot：受击音 %s 加载失败，退回程序化合成音" % HIT_SOUND_PATH)
-	return _build_hit_sound()
+## 每次受击调用：**随机**取一条素材播放。
+## 素材池为空（目录不存在 / 全部加载失败）时退回程序化合成音 `_build_hit_sound()`（只算一次并缓存）。
+func _play_hit_sound() -> void:
+	var stream: AudioStream = HitSounds.pick_random()
+	if stream == null:
+		stream = _fallback_hit_sound()
+	_hit_audio.stream = stream
+	_hit_audio.pitch_scale = randf_range(HIT_PITCH_MIN, HIT_PITCH_MAX)
+	_hit_audio.play()
+
+
+## 降级合成音的**单例缓存**（`_build_hit_sound()` 逐样本合成较慢，每次受击重建会掉帧）
+var _fallback_hit_sound_cached: AudioStreamWAV = null
+
+func _fallback_hit_sound() -> AudioStreamWAV:
+	if _fallback_hit_sound_cached == null:
+		_fallback_hit_sound_cached = _build_hit_sound()
+	return _fallback_hit_sound_cached
 
 
 ## 受击音效的**降级素材**：程序化合成的短促「闷哼」（下滑音 + 噪声质感），参考 audio_3d.gd 的合成方式。

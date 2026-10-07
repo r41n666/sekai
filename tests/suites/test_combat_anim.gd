@@ -26,6 +26,10 @@ const MIKU_MODEL_SRC := "res://scripts/entities/miku_model.gd"
 const WEAPON_SRC := "res://scripts/shooting/weapon.gd"
 const BOT_SRC := "res://scripts/entities/bot.gd"
 const PLAYER_SRC := "res://scripts/player.gd"
+const HIT_SOUNDS_SRC := "res://scripts/shooting/hit_sounds.gd"
+
+## 共享受击素材池（真实调用，非查文本）—— ⚠ 用 preload，勿依赖全局 class_name（§4-17 类缓存坑）
+const HitSounds := preload("res://scripts/shooting/hit_sounds.gd")
 
 
 func _read_source(path: String) -> String:
@@ -632,24 +636,69 @@ func test_bot_has_fire_hit_and_death_actions() -> void:
 	check_true(body.find("play_death()") >= 0, "bot.gd 归零时必须触发死亡动作")
 
 
-## 受击音效：**玩家与敌人**都必须用 `sfx/hit_female/hit_f_01.wav`（用户要求"只用"该 wav），
-## 且都要有 3D 音频节点 + 随机音高；并且用 `load_from_file` 直读（headless / 未导入也能出声）。
+## 受击音效：玩家与敌人**共用 `sfx/hit_female/` 素材池**，**每次受击随机取一条**播放
+## （用户要求「每次有攻击触发随机选择一个播放」）；两端都要有 3D 音频节点 + 随机音高；
+## 素材用 `load_from_file` 直读（这些 wav **未被 Godot 导入**，headless / 源码运行也要能出声）。
 func test_hit_sound_wired_for_bot_and_player() -> void:
 	var cases := [["bot.gd", _read_source(BOT_SRC)], ["player.gd", _read_source(PLAYER_SRC)]]
 	for case in cases:
 		var file_name: String = case[0]
 		var src: String = case[1]
-		check_true(src.find("sfx/hit_female/hit_f_01.wav") >= 0,
-			"%s 必须引用 sfx/hit_female/hit_f_01.wav（两端共用同一素材）" % file_name)
+		check_true(src.find("hit_sounds.gd") >= 0 or src.find("HitSounds") >= 0,
+			"%s 必须引用共享素材池 scripts/shooting/hit_sounds.gd（两端共用）" % file_name)
 		check_true(src.find("AudioStreamPlayer3D") >= 0,
 			"%s 必须有一台 AudioStreamPlayer3D 受击音节点" % file_name)
-		check_true(src.find("load_from_file") >= 0,
-			"%s 必须用 AudioStreamWAV.load_from_file 直读（headless / 未导入也能出声）" % file_name)
 		check_true(src.find("randf_range") >= 0,
 			"%s 的受击音必须有随机音高（连续受击不单调）" % file_name)
-	# bot 保留程序化合成音作为**降级**（wav 加载失败也不该让人机彻底没有受击反馈）
+		# ⚠ 不能是「建一次就固定」的 stream：必须每次受击重新取
+		check_true(src.find("pick_random()") >= 0,
+			"%s 必须每次受击调 HitSounds.pick_random() 取素材，不能只在 _ready 时固定一条" % file_name)
+		check_true(src.find("_play_hit_sound()") >= 0,
+			"%s 应有 _play_hit_sound() 统一入口（避免各处零散播放）" % file_name)
+		check_true(src.find("pitch_scale") >= 0 and src.find(".play()") >= 0,
+			"%s 的受击音必须真正播放（设 pitch_scale 并 play）" % file_name)
+		# 反向断言：旧的「单文件常量」写法已废除
+		check_true(src.find("HIT_SOUND_PATH") < 0,
+			"%s 不应再有 HIT_SOUND_PATH 单文件常量（已改为素材池随机）" % file_name)
+	# bot 保留程序化合成音作为**降级**（素材池为空也不该让人机彻底没有受击反馈）
 	check_true(_read_source(BOT_SRC).find("_build_hit_sound") >= 0,
 		"bot.gd 必须保留 _build_hit_sound() 作为降级路径")
+
+
+## 共享素材池本身：必须**扫描目录取全部 .wav**（不是写死单条），且用 load_from_file 直读。
+func test_hit_sound_pool_scans_all_wavs() -> void:
+	var src := _read_source(HIT_SOUNDS_SRC)
+	check_true(src.find("res://sfx/hit_female/") >= 0,
+		"hit_sounds.gd 必须指向用户指定的素材目录 res://sfx/hit_female/")
+	check_true(src.find("DirAccess") >= 0,
+		"hit_sounds.gd 必须用 DirAccess 扫描目录（这样用户新增音效可自动纳入）")
+	check_true(src.find(".wav") >= 0 or src.find("ends_with(\".wav\")") >= 0,
+		"hit_sounds.gd 必须按 .wav 扩展名筛选")
+	check_true(src.find("load_from_file") >= 0,
+		"hit_sounds.gd 必须用 AudioStreamWAV.load_from_file 直读（这些 wav 无 .import）")
+	check_true(src.find("randi()") >= 0,
+		"hit_sounds.gd 的 pick_random() 必须用随机下标（而不是固定第一条）")
+	# 关键：不许退回「写死 hit_f_01.wav」
+	check_true(src.find("hit_f_01.wav") < 0,
+		"hit_sounds.gd 不应写死 hit_f_01.wav（用户要求 27 个素材随机）")
+
+
+## 素材池**实测**：目录里有多少 .wav，就该加载出多少条（真实读取，不是查源码文本）。
+func test_hit_sound_pool_loads_all_files() -> void:
+	var wav_count: int = HitSounds.wav_file_count()
+	check_true(wav_count > 0,
+		"res://sfx/hit_female/ 至少应有 1 个 .wav（用户已放入素材）")
+	var loaded: int = HitSounds.loaded_count()
+	check_eq(loaded, wav_count,
+		"素材池加载条数应等于目录里的 .wav 数（每条都要能被 load_from_file 读出）")
+	# 随机性：连抽多次应能覆盖到多条不同素材（证明不是恒定返回第一条）
+	var ids := {}
+	for i in 40:
+		var s := HitSounds.pick_random()
+		if s != null:
+			ids[s.get_instance_id()] = true
+	check_true(ids.size() >= 2,
+		"pick_random() 连抽 40 次至少应覆盖 2 条不同素材（实际覆盖 %d 条）" % ids.size())
 
 
 ## 程序化姿态必须在 valid 判断之前推进战斗计时，但绝不碰骨骼（降级安全）。
