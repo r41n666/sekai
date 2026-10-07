@@ -33,25 +33,25 @@ shake_per_shot = 0.18
 tracer_lifetime = 0.035
 
 [node name="Model" parent="." instance=ExtResource("3_model")]
-transform = Transform3D(-0.08, 0, 0, 0, 0.08, 0, 0, 0, -0.08, 0, 0, 0)
+transform = Transform3D(0, 0, 0.000232, 0, 0.000232, 0, -0.000232, 0, 0, 0.013168, -0.035667, -0.030127)
 
 [node name="Muzzle" type="Marker3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.146)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.059, 0.197)
 
 [node name="MuzzleLight" type="OmniLight3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.152)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.059, 0.203)
 visible = false
 light_color = Color(1, 0.85, 0.55, 1)
 light_energy = 2.5
 omni_range = 4.0
 
 [node name="MuzzleFlash" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.168)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.059, 0.219)
 visible = false
 mesh = SubResource("SphereMesh_flash")
 material_override = SubResource("StandardMaterial3D_flash")
 
 [node name="GunAudio" type="AudioStreamPlayer3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.03)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.059, 0.081)
 unit_size = 12.0
 script = ExtResource("2_gun_audio")

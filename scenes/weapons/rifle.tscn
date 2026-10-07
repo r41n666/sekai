@@ -22,24 +22,25 @@ script = ExtResource("1_weapon")
 display_name = "AK-47 突击步枪"
 
 [node name="Model" parent="." instance=ExtResource("3_model")]
+transform = Transform3D(0, 0, -0.4591, 0, 0.4591, 0, 0.4591, 0, 0, 0.1813, -0.028, -2.148)
 
 [node name="Muzzle" type="Marker3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.12, 0.557)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.078, 0.45)
 
 [node name="MuzzleLight" type="OmniLight3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.12, 0.565)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.078, 0.458)
 visible = false
 light_color = Color(1, 0.85, 0.55, 1)
 light_energy = 4.0
 omni_range = 6.0
 
 [node name="MuzzleFlash" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.12, 0.585)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.078, 0.478)
 visible = false
 mesh = SubResource("SphereMesh_flash")
 material_override = SubResource("StandardMaterial3D_flash")
 
 [node name="GunAudio" type="AudioStreamPlayer3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.06, 0.15)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.018, 0.043)
 unit_size = 12.0
 script = ExtResource("2_gun_audio")

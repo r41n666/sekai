@@ -7,4 +7,4 @@
 script = ExtResource("1_knife")
 
 [node name="Model" parent="." instance=ExtResource("2_model")]
-transform = Transform3D(0, 0, 0.25, 0.25, 0, 0, 0, 0.25, 0, 0, 0, -0.125)
+transform = Transform3D(0.9115, 0, 0, 0, 0.9115, 0, 0, 0, 0.9115, 0, 0, 0.02648)

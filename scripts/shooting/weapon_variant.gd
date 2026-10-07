@@ -23,6 +23,19 @@ extends RefCounted
 ##     本地坐标（可在 tools/weapon_variant_check 的「网格…surface」行或临时脚本里量到），
 ##     不是 glb 文件里的原始数字；两者差一个缩放+换轴。
 ## display：套用后写进武器的 display_name（HUD 上显示的名字）
+##
+## ⚠⚠ 陷阱：`transform` 必须与 `scenes/weapons/*.tscn` 里 Model 节点的占位 transform **一致**，
+##   但两者的书写形式语义不同，非对称基会差一个**转置**：
+##     · 本表用 `Transform3D(Vector3, Vector3, Vector3, Vector3)` —— 三个向量当**列**；
+##     · `.tscn` 用 12 个浮点 —— 分量按**行**解释。
+##   对角阵（纯缩放）时行=列所以看不出差别；`ak47` 是首个非对称基，踩过坑：
+##   抄错转置会让枪渲染到角色 ~2m 外（实测枪世界 AABB 中心距角色 2.20 m）。
+##   ⚠ 且 `.tscn` **不支持 `##` / `//` 注释**（那是 GDScript 的），写进去会 `Parse error`、
+##     整个场景加载失败 —— 故说明只能写在这里。
+##   ⇒ 改任一处的 transform，都要同步另一处，并用 `tools/weapon_variant_check.tscn` 复核
+##     「武器空间包围盒」（ak47 应为 0.062 × 0.252 × 0.880、muzzle z=0.45）。
+##   ⇒ 为什么 .tscn 里也要有一份：`apply_variant` 只在 `is_multiplayer_authority()` 时被调，
+##     联机时**远端玩家的枪**走不到那条路，只能靠场景占位值。
 const VARIANTS := {
 	"Rifle": [
 		{
