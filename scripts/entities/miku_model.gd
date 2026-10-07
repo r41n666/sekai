@@ -8,6 +8,11 @@ class_name MikuModel
 ## - 模型里有 Skeleton3D 时，把武器（Rifle）挂到右手骨骼的 BoneAttachment3D 上；否则维持挂在模型节点下。
 ## 模型正面不是 +Z（player.gd 的转向基准）时，把 yaw_offset_deg 设为 180 之类的补正值。
 
+## 双手持枪 IK 脚本。用 preload 而不是全局 `class_name` 引用：
+## 全局类名依赖 `.godot/global_script_class_cache.cfg`（需一次导入/开编辑器才登记），
+## preload 则任何情况下都能解析，避免「新加的 class_name 在 headless 首次运行时找不到」。
+const WeaponHoldIKScript := preload("res://scripts/entities/weapon_hold_ik.gd")
+
 ## 模型路径（想用别的文件名就改这里）
 @export var model_path := "res://assets/models/miku/miku.glb"
 ## 朝向补正：模型正面朝 -Z 时填 180
@@ -80,6 +85,31 @@ const HAND_BONE_BLOCK := ["捩", "指", "握り", "拡散", "先", "ik", "親", 
 @export var fade_time := 0.18
 ## 跑 / 走的判定阈值（速度比例）
 @export var run_threshold := 0.62
+## 双手持枪 IK 开关（Spike 能力）。
+## ⚠ 默认 **false** = 完全维持既有单臂持械行为（不破坏基线）。
+## 打开后：若当前模型有标准人形骨架（如 cat_hatsune_miku），双臂由 TwoBoneIK3D 拉到两个握持点，
+## 武器朝向由握持点推导；骨架不达标（如乱码 MMD 名的 miku.glb）时自动退回旧行为。
+@export var hold_ik_enabled := false
+## 「腿程序化 + 手臂 IK」分层开关（Spike 能力，见 `docs` 报告）。
+##
+## ⚠ 默认 **false** = 完全维持既有「全有或全无」行为（不破坏基线）。
+## 打开后，对**有 idle 剪辑但 idle 是 T-pose 定格**的模型（如 cat_hatsune_miku），
+## 绕开 `_start_procedural_pose` 的 `return`，让 `MikuProceduralPose` **只接管腿 + 躯干**，
+## 手臂留给 `WeaponHoldIK` 的 TwoBoneIK3D：
+##   · 腿 / 骨盆 / 头 → 程序化步态（走路时腿会交替迈步、身体起伏）
+##   · 双臂 → IK 拉到握持点（双手持枪）
+## 两者写**不相交**的骨骼，不打架（`MikuProceduralPose.pose_arms=false`）。
+## 仅当模型骨架能被 `MikuProceduralPose` 解析（valid）时才生效，否则静默退回旧行为。
+@export var procedural_legs_enabled := false
+## 分层模式下是否把握持点挂到**躯干**（chest 骨）的 BoneAttachment3D 上，随骨盆的 lean / bob 一起走。
+##
+## ⚠ 默认 **false**（把握持点固定在骨架空间，与已验证的 spike 行为一致）。实测结论（见报告）：
+##   · 修好 bob 缩放后，走路时躯干起伏只剩 **3.3 cm**；而挂躯干锚点会引入最多 **~6 cm** 的
+##     手↔目标残差（`BoneAttachment3D` 与 `SkeletonModifier3D` 的更新时序所致，锚点本身跟随 chest 无误）。
+##   · 二者截图**肉眼无差别**。⇒ 锚点「修正的偏差（3.3 cm）」小于「它引入的残差（6 cm）」，
+##     故默认不用。若将来把 bob / lean 幅度调大，或用于躯干运动更剧烈的动作，可再打开本开关。
+## 仅在分层模式（procedural_legs_enabled 且 pose_arms=false）下才生效，不影响默认行为。
+@export var hold_ik_torso_anchor := false
 
 ## 几何法找右手时的排除词（头发 / 裙子等辅助骨骼不能当手）与最低高度比例
 const HAND_SEARCH_BLOCK := [
@@ -103,6 +133,8 @@ var _first_person := false
 var _loaded_model: Node
 var _anim: AnimationPlayer
 var _procedural: MikuProceduralPose
+## 双手持枪 IK（可切换能力；见 weapon_hold_ik.gd）。骨架不达标时为 null。
+var _hold_ik
 var _state_clips: Dictionary = {} # idle / walk / run / jump -> 动画名
 ## 战斗动作剪辑：fire / hit / death / reload -> 动画名（匹配不到就是空串 = 走程序化动作）
 var _combat_clips: Dictionary = {}
@@ -132,6 +164,30 @@ func set_holding_weapon(on: bool) -> void:
 	_holding_weapon = on
 	if _procedural != null:
 		_procedural.holding_weapon = on
+	_sync_hold_ik()
+
+
+## 双手持枪 IK 是否可用（当前模型骨架是否有标准左右手臂链）
+func is_hold_ik_available() -> bool:
+	return _hold_ik != null and _hold_ik.valid
+
+
+## 运行时开关双手持枪 IK（Esc 菜单 / 调试键可用）。骨架不达标时静默无效。
+func set_hold_ik_enabled(on: bool) -> void:
+	hold_ik_enabled = on
+	_sync_hold_ik()
+
+
+func toggle_hold_ik() -> void:
+	set_hold_ik_enabled(not hold_ik_enabled)
+
+
+## 把「是否开 IK」同步到武器持有 / 第一人称状态：
+## IK 只在「开关打开 + 正持械 + 第三人称 + 骨架可用」时生效，其余情况完全退回旧路径。
+func _sync_hold_ik() -> void:
+	if _hold_ik == null:
+		return
+	_hold_ik.set_enabled(hold_ik_enabled and _holding_weapon and not _first_person)
 
 
 ## 开镜 / 收镜时由 player.gd 调用：第一人称下武器跟着收进画面中心
@@ -149,10 +205,11 @@ func set_first_person(on: bool) -> void:
 			_weapon_follow = false
 		elif _loaded_model != null and is_instance_valid(_loaded_model):
 			_attach_weapon_to_hand(_loaded_model)
+	_sync_hold_ik()
 	_apply_model_visibility()
 
 
-## 每帧把武器摆到该在的位置：第一人称贴相机，第三人称贴右手骨骼
+## 每帧把武器摆到该在的位置：第一人称贴相机，第三人称贴右手骨骼 / 双手 IK
 func _process(delta: float) -> void:
 	_update_idle_intensity(delta)
 	_tick_combat_clip(delta)
@@ -160,6 +217,9 @@ func _process(delta: float) -> void:
 		return
 	if _first_person:
 		_follow_view_camera()
+	elif _hold_ik != null and _hold_ik.is_enabled():
+		# 双手 IK：武器坐标系由「右手握把 + 左手护木」两点推导，不再无条件朝正前方
+		_weapon_mount.global_transform = _hold_ik.get_weapon_transform()
 	elif _weapon_follow:
 		_follow_hand_bone()
 
@@ -250,6 +310,7 @@ func load_model(path: String) -> bool:
 	if not _first_person:
 		_attach_weapon_to_hand(_loaded_model)
 	_start_procedural_pose(_loaded_model)
+	_start_hold_ik(_loaded_model)
 	model_loaded = true
 	# 必须在 model_loaded = true 之后再刷新可见性，否则占位胶囊不会隐藏（会和模型重叠）
 	_apply_model_visibility()
@@ -338,7 +399,10 @@ func _lowest_y_under(node: Node, parent_xform: Transform3D) -> float:
 func update_animation(delta: float, speed_mps: float, speed_ratio: float, moving: bool, on_floor: bool) -> void:
 	if _procedural != null:
 		_procedural.update(delta, speed_mps, moving, speed_ratio >= run_threshold, on_floor)
-		return
+		# 分层模式（pose_arms=false）：程序化只驱动腿，**继续往下切动画**，
+		# 让手臂 / 手指从剪辑拿到基线姿态（IK 再叠在剪辑之上）。
+		if _procedural.pose_arms:
+			return
 	if _anim == null:
 		return
 	var state := "idle"
@@ -471,15 +535,51 @@ func _start_procedural_pose(model: Node) -> void:
 			has_state_clip = true
 			break
 	if has_state_clip:
+		# 既有行为：有状态剪辑 → 全交给 AnimationPlayer，不启用程序化姿态。
+		# 例外（新增，默认关）：procedural_legs_enabled 时让程序化姿态**只接管腿 + 躯干**，
+		# 手臂留给剪辑 / IK —— 解决「idle 是 T-pose 定格、除手臂外全身不动」的模型（cat_hatsune_miku）。
+		if procedural_legs_enabled:
+			_build_procedural_pose(model, false, true)
 		return
+	_build_procedural_pose(model, true, false)
+
+
+## 建立程序化姿态。`arms=true` = 全程序化（腿 + 手臂 + 躯干；无剪辑模型的兜底路径）；
+## `arms=false` = 只接管腿 + 躯干，手臂留给 IK / 剪辑（分层路径，见 procedural_legs_enabled）。
+func _build_procedural_pose(model: Node, arms: bool, layered: bool) -> void:
 	var skeleton := _find_skeleton(model)
 	if skeleton == null:
 		return
 	var pose := MikuProceduralPose.new()
+	pose.pose_arms = arms
 	pose.holding_weapon = _holding_weapon
 	if pose.setup(skeleton, self):
 		_procedural = pose
-		print("MikuModel：没有可用的状态动画剪辑，已启用程序化姿态 ", pose.debug_names)
+		if layered:
+			print("MikuModel：腿程序化 + 手臂 IK 分层已启用（pose_arms=false）", pose.debug_names)
+		else:
+			print("MikuModel：没有可用的状态动画剪辑，已启用程序化姿态 ", pose.debug_names)
+
+
+## 搭建双手持枪 IK（与程序化姿态 / 动画剪辑互不干扰：它只接管两条手臂链）。
+##
+## ⚠ 与 `_start_procedural_pose` 的「全有或全无」设计**正交**：
+##   · 有 idle 剪辑的模型（cat_hatsune_miku）走剪辑通道 → `_procedural == null`，IK 叠在剪辑之上；
+##   · 无剪辑的模型走程序化姿态 → 但那些模型（miku.glb 乱码骨名）解析不出手臂链 → IK 自动不启用。
+##   因此两条管线不会同时对同一骨骼写姿态。
+func _start_hold_ik(model: Node) -> void:
+	_hold_ik = null
+	var skeleton := _find_skeleton(model)
+	if skeleton == null:
+		return
+	var ik = WeaponHoldIKScript.new()
+	# 分层模式（程序化姿态已启用且不接管手臂）→ 把握持点挂到躯干上，随骨盆的 lean / bob 一起走，
+	# 避免「躯干动了、目标点不动、手臂被拉扯」的基准冲突。
+	ik.attach_targets_to_torso = hold_ik_torso_anchor and _procedural != null and not _procedural.pose_arms
+	if ik.setup(skeleton, self):
+		_hold_ik = ik
+		_sync_hold_ik()
+		print("MikuModel：已就绪双手持枪 IK ", ik.debug_names)
 
 
 func _clear_loaded_model() -> void:
@@ -487,6 +587,10 @@ func _clear_loaded_model() -> void:
 	if _idle_motion != null and is_instance_valid(_idle_motion):
 		_idle_motion.queue_free()
 	_idle_motion = null
+	# 双手 IK 的 modifier / 目标节点挂在骨架下，会随骨架一起释放；这里只清引用
+	if _hold_ik != null:
+		_hold_ik.teardown()
+		_hold_ik = null
 	if _loaded_model == null or not is_instance_valid(_loaded_model):
 		return
 	_detach_weapon_back()

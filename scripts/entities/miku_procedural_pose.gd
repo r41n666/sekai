@@ -30,7 +30,12 @@ const WALK_ARM_DEG := 16.0
 const RUN_ARM_DEG := 28.0
 const ELBOW_BEND_DEG := 18.0    # 肘部常态弯曲
 const ANKLE_FACTOR := 0.45      # 脚掌补偿系数（抵消大腿+膝盖旋转，保持脚大致水平）
-const BOB_UNITS := 0.22         # 身体起伏（骨架空间单位，≈1.7 cm）
+## 身体起伏幅度 = 骨架高度 × 该比例（**不是**绝对骨架单位 —— 绝对单位在不同单位的骨架上会差 ~15 倍）。
+## 原常量 `BOB_UNITS = 0.22 骨架单位` 是在 miku.glb（骨架高 ≈23.539 单位）上标定的，
+## 折算成比例 = 0.22 / 23.5392299890518 ≈ 0.00934601 → **miku.glb 的起伏完全不变（0.22 单位 ≈1.6 cm）**。
+## 而骨架单位小的模型（cat_hatsune_miku 骨架高仅 1.51 单位）不再出现 25 cm 的夸张起伏（→ ≈1.6 cm）。
+## 守恒锚点：`bob_amplitude(23.5392299890518) == 0.22`（见 tests/suites/test_procedural_legs_layer.gd）。
+const BOB_RATIO := 0.00934601
 const LEAN_DEG := 4.0           # 移动时前倾（跑动再乘 1.6）
 const JUMP_LEG_DEG := 14.0
 const JUMP_KNEE_DEG := 30.0
@@ -96,6 +101,13 @@ var _arm_swing := 0.0
 var _arm_down := ARM_DOWN_DEG
 ## 是否端着武器（由 MikuModel.set_holding_weapon 设置）
 var holding_weapon := false
+## 是否由本类接管**手臂**。默认 true（全有：腿 + 手臂 + 躯干都由程序化姿态驱动，miku.glb 路径）。
+## 设为 false 时只驱动**腿 + 躯干（_center）+ 头**，两条手臂链**完全不动**——留给 `TwoBoneIK3D`
+## （双手持枪）或 AnimationPlayer 剪辑。这是「腿程序化 + 手臂 IK」分层的开关（见
+## `MikuModel.procedural_legs_enabled`）。
+## ⚠ 语义：`pose_arms=false` 时本类**既不写也不清**手臂骨（`_apply_pose` 跳过 `_pose_arm`），
+## 避免与 IK modifier 抢同一批骨骼。
+var pose_arms := true
 var _hold_forward := 0.0     # 持械时上臂前抬角（平滑，弧度）
 var _hold_elbow := ELBOW_BEND_DEG
 var _lean := 0.0
@@ -199,8 +211,11 @@ func setup(skeleton: Skeleton3D, reference: Node3D) -> bool:
 	valid = (_thigh_r >= 0 or _thigh_l >= 0) and _leg_length > 0.001
 	_down_sign_r = _down_sign(_arm_r)
 	_down_sign_l = _down_sign(_arm_l) if _arm_l >= 0 else -_down_sign_r
-	_controlled = [_thigh_r, _thigh_l, _knee_r, _knee_l, _ankle_r, _ankle_l,
-		_arm_r, _arm_l, _elbow_r, _elbow_l, _center, _head]
+	# 受控骨骼清单：`pose_arms=false` 时**不含**手臂骨 —— 这样 `_apply_pose` 的「先清空覆写」
+	# 循环也不会碰手臂，手臂链完全留给 IK modifier / 剪辑（不与 IK 抢骨骼）。
+	_controlled = [_thigh_r, _thigh_l, _knee_r, _knee_l, _ankle_r, _ankle_l, _center, _head]
+	if pose_arms:
+		_controlled.append_array([_arm_r, _arm_l, _elbow_r, _elbow_l])
 	debug_names = {
 		"thigh_r": _name_of(_thigh_r), "thigh_l": _name_of(_thigh_l),
 		"knee_r": _name_of(_knee_r), "ankle_r": _name_of(_ankle_r),
@@ -282,7 +297,7 @@ func _apply_pose() -> void:
 	var ankle_r := -(thigh_r + knee_r) * ANKLE_FACTOR
 	var ankle_l := -(thigh_l + knee_l) * ANKLE_FACTOR
 	# 身体起伏：每周期两次（双支撑最低、过渡最高）
-	_bob = -BOB_UNITS * cos(_phase * 2.0) * (_leg_amplitude / maxf(deg_to_rad(WALK_LEG_DEG), 0.001))
+	_bob = -bob_amplitude(_height) * cos(_phase * 2.0) * (_leg_amplitude / maxf(deg_to_rad(WALK_LEG_DEG), 0.001))
 	_bob_offset = _up * _bob
 	var down := deg_to_rad(_arm_down)
 	var swing_scale := HOLD_SWING_SCALE if holding_weapon else 1.0
@@ -310,15 +325,17 @@ func _apply_pose() -> void:
 		knee_l + float(off[MikuCombatAnim.CH_KNEE]),
 		ankle_l)
 	# 摆臂：正 = 前摆（与 HOLD_ARM_FORWARD_DEG 同向）；down：正 = 更垂（与 ARM_DOWN_DEG 同向）
-	var arm_swing_r := -_arm_swing * swing_scale * cos(theta_r) + _hold_forward \
-		+ float(off[MikuCombatAnim.CH_ARM_R_SWING])
-	var arm_swing_l := -_arm_swing * cos(theta_l) + float(off[MikuCombatAnim.CH_ARM_L_SWING])
-	var arm_down_r := (down + float(off[MikuCombatAnim.CH_ARM_R_DOWN])) * _down_sign_r
-	var arm_down_l := (down + float(off[MikuCombatAnim.CH_ARM_L_DOWN])) * _down_sign_l
-	_pose_arm(_arm_r, _elbow_r, base, arm_swing_r, arm_down_r,
-		_hold_elbow + float(off[MikuCombatAnim.CH_ARM_R_ELBOW]))
-	_pose_arm(_arm_l, _elbow_l, base, arm_swing_l, arm_down_l,
-		elbow + float(off[MikuCombatAnim.CH_ARM_L_ELBOW]))
+	# ⚠ pose_arms=false 时**完全不碰手臂**（连摆臂/持械臂动作也不做），手臂交给 IK / 剪辑。
+	if pose_arms:
+		var arm_swing_r := -_arm_swing * swing_scale * cos(theta_r) + _hold_forward \
+			+ float(off[MikuCombatAnim.CH_ARM_R_SWING])
+		var arm_swing_l := -_arm_swing * cos(theta_l) + float(off[MikuCombatAnim.CH_ARM_L_SWING])
+		var arm_down_r := (down + float(off[MikuCombatAnim.CH_ARM_R_DOWN])) * _down_sign_r
+		var arm_down_l := (down + float(off[MikuCombatAnim.CH_ARM_L_DOWN])) * _down_sign_l
+		_pose_arm(_arm_r, _elbow_r, base, arm_swing_r, arm_down_r,
+			_hold_elbow + float(off[MikuCombatAnim.CH_ARM_R_ELBOW]))
+		_pose_arm(_arm_l, _elbow_l, base, arm_swing_l, arm_down_l,
+			elbow + float(off[MikuCombatAnim.CH_ARM_L_ELBOW]))
 	# 头：叠在身体链之上（base 已含俯仰 / 侧倾 / 下沉）。找不到头骨时静默跳过。
 	if _head >= 0:
 		var head_rest := _skeleton.get_bone_global_rest(_head)
@@ -618,3 +635,9 @@ func _down_sign(arm_idx: int) -> float:
 	if arm_idx < 0:
 		return 1.0
 	return 1.0 if _skeleton.get_bone_global_rest(arm_idx).origin.dot(_right) > 0.0 else -1.0
+
+
+## 身体起伏幅度（骨架空间单位）：与骨架高度成正比。
+## 纯静态函数，便于逐值断言「换骨架时起伏按比例缩放」（见守恒对照测试）。
+static func bob_amplitude(height: float) -> float:
+	return BOB_RATIO * height

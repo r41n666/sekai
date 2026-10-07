@@ -13,3 +13,9 @@
 
 # tools/mutation_combat_anim.py 的字节备份目录（跨运行稳定，用于启动自愈还原）
 /.mutation_backup/
+
+# tools/mutation_weapon_hold.py 的字节备份目录（与上者分开，PENDING.json 不能互相覆盖）
+/.mutation_backup_holdik/
+
+# tools/capture_hold_ik.gd 的临时截图输出（目视验证用，挑好的图再归档）
+/tmp_spike/

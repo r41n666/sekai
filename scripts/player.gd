@@ -192,6 +192,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.echo:
 		return
 
+	# T：切换「双手持枪 IK」（Spike 能力开关，用来对比新旧两种持械姿势）。
+	# ⚠ 这是**裸键**、不是 [input] 动作 —— 因此不改 project.godot 的输入映射表
+	#   （项目铁律：project.godot 内含 Vulkan 锁，见 control_checklist §4-17）。
+	#   纯本地视觉开关，不走 RPC。
+	if event is InputEventKey and event.pressed and event.physical_keycode == KEY_T:
+		_model.toggle_hold_ik()
+		get_viewport().set_input_as_handled()
+		return
+
 	# 1 主武器 / 2 副武器 / 3 蝴蝶刀 / 4 手雷；同一键再按一次 = 空手
 	for action in SLOT_FOR_ACTION:
 		if event.is_action_pressed(action):
