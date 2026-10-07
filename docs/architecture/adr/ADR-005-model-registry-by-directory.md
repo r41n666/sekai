@@ -64,7 +64,9 @@
 
 - 新增模型 SOP（与 `README §7` 一致）：
   1. 放入 `assets/models/<目录名>/<文件>.glb`；
-  2. `godot --headless --path . --import`（生成 `.import` 并抽贴图）；
+  2. 让 Godot 导入（生成 `.import` 并抽贴图）。
+     ⚠️ 命令行 `--import` 会走编辑器代码路径、**可能删掉 `project.godot` 的 Vulkan 锁**（已复发 6 次，
+     见 `control_checklist.md` §4-17）⇒ 优先「重新打开项目」让编辑器导入；非要用 `--import`，用后必须 grep 复核该锁。
   3. 做一次朝向实拍 → 决定是否登记 `MODEL_YAW_CORRECTION`；
   4. 若渲染出舞台 / 白板 → 登记 `MODEL_STRIP_PROPS`；
   5. 若需要更强的待机微动 → 登记 `IDLE_PROFILES`。

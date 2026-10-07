@@ -12,10 +12,12 @@
 **必须用「测试场景 + Runner 节点」运行**（不是 `-s`），因为 Autoload 只有在普通场景运行时才注册：
 
 ```bash
-# 一步：导入资源（首次 / 新增脚本后）
+# ⚠️ --import 只在「类缓存不存在」时才需要（首次 / 清过 .godot 后）。
+#    它会走编辑器代码路径、可能删掉 project.godot 的 Vulkan 锁（已复发 6 次，见 control_checklist §4-17）。
+#    缓存已在时**直接跑第二步**；若确实跑了 --import，用后必须 grep 复核该锁还在。
 "C:/Users/Administrator/Desktop/Godot_v4.7.2-stable_win64_console.exe" --headless --path . --import
 
-# 两步：跑测试场景
+# 跑测试场景（日常只需这一步）
 "C:/Users/Administrator/Desktop/Godot_v4.7.2-stable_win64_console.exe" --headless --path . res://tests/test_runner.tscn
 ```
 

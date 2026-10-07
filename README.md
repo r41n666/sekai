@@ -30,8 +30,10 @@
 命令行验证（无需打开编辑器）：
 
 ```powershell
-# 只导入资源并检查是否有解析/导入错误
-godot --headless --path . --import
+# ⚠️ 本机踩坑记录：不要用 --import（它会走编辑器代码路径，可能改写 project.godot）
+#    资源已导入过就直接跑测试门禁；确实需要重建类缓存时才用 --import，
+#    且**用后必须 grep 复核 Vulkan 锁还在**（见 tools/verify.sh 的前置断言）。
+godot --headless --path . tests/test_runner.tscn
 
 # 无窗口跑 300 帧，检查运行时错误
 godot --headless --path . --quit-after 300
@@ -41,7 +43,7 @@ godot --headless --path . --quit-after 300
 
 ```bash
 bash tools/verify.sh          # 静默模式：只打印每环节 PASS/FAIL + 最终退出码
-bash tools/verify.sh -v       # 详细模式：追加 --import / 测试的完整原始输出
+bash tools/verify.sh -v       # 详细模式：追加各环节（含 import）与测试的完整原始输出
 ```
 
 把「导入资源 → 脚本可解析性校验 → 全量测试」固化成一条命令。**任一环节失败即非零退出**（退出码 `1`；`2` = 找不到 Godot 或缺参数），可直接挂进提交前钩子。
@@ -204,7 +206,14 @@ MikuHighQualityWalk/
 - **已开启 TAA**，**已关闭 MSAA**；8x 各向异性过滤；Jolt Physics。
 - **FSR 2.2（可选）**：帧率不够时在 `项目设置 → Rendering → Scaling 3D` 里选 `FSR 2.2`、`Scale 0.77`
   （或取消注释 `project.godot` `[rendering]` 段的 `scaling_3d/mode=2` 与 `scaling_3d/scale=0.77`）。
-- Windows 默认走 **D3D12** 驱动；如遇兼容问题，删掉 `project.godot` 里的 `rendering_device/driver.windows` 一行即可回退 Vulkan。
+- ⚠️ **Windows 固定走 Vulkan（`rendering_device/driver.windows="vulkan"`，已锁，不要删）**。
+  本机（AMD RX 6750 GRE）实测 **D3D12 反而会崩**：`CreateResource failed with error 0x80070057`
+  → 渲染器拿空 RID 继续走 → 进程崩掉（编辑器里表现为 "Debugging process stopped"）。
+  这是 Godot D3D12 后端缺陷，非本项目代码问题。**该行被删即测试转红**
+  （`tests/suites/test_render_driver.gd` 已加锁）；完整排查记录见
+  `docs/architecture/control_checklist.md` §4-17。
+  ⇒ 若该行意外丢失，还原命令：`git show HEAD:project.godot > project.godot`
+  （**不要用 `git checkout --`**，本项目实测它会假成功：退出码 0 但内容没还原）。
 
 ---
 
@@ -373,7 +382,9 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 
 1. 把模型放进 `assets/models/<目录名>/<文件名>.glb`（**必须带一层子目录** —— 扫描器只遍历子目录，散在
    `assets/models/` 根下的 `.glb` 不会被识别为角色；贴图放同目录即可）。
-2. 重新打开项目 / 跑一次 `godot --headless --path . --import` 让 Godot 导入（生成 `.glb.import` 并抽出贴图）。
+2. 重新打开项目让 Godot 导入（生成 `.glb.import` 并抽出贴图）。
+   ⚠️ 命令行重建用 `--import` 时要**用后复核 Vulkan 锁**（它会走编辑器代码路径，可能改写 `project.godot`）——
+   见 `tools/verify.sh` 里的前置断言与 `control_checklist.md` §4-17。
 3. 运行即可 —— 模型会出现在 Esc 菜单的角色列表里（`MikuModel.list_available_models()` 自动扫描）。
    如需微调，按目录名往三张表里加一条：`MODEL_YAW_CORRECTION`（朝向）、`MODEL_STRIP_PROPS`（展示台道具）、
    `IDLE_PROFILES`（待机微动作）；另有 `MODEL_FIT_SCALE`（缩放微调，目前为空 = 完全信任自动缩放）。
@@ -742,6 +753,9 @@ HUD 与游戏逻辑**不做硬引用**，全部通过场景组（`player` / `wea
 >    立刻看到正常站姿。结论：几何异常时先怀疑测量，再怀疑模型。
 > 2. **`--check-only` 不解析 `class_name`** —— 单脚本语法检查会因为找不到 `MikuIdleMotion` 而报错，必须先跑一次
 >    全项目 `--import` 让全局类缓存建立，再检查才是可信的。
+>    ⚠️ **后续补充（2026-10-07）**：`--import` 会走编辑器代码路径，**可能把 `project.godot` 里的 Vulkan 锁整块删掉**。
+>    故它只在「类缓存确实不存在」时才需要跑；缓存已在时改跑 `tests/test_runner.tscn` 即可（`tools/verify.sh` 已按此条件化）。
+>    该锁已复发 6 次、根因与守门见 `docs/architecture/control_checklist.md` §4-17。
 > 3. **`queue_free()` 是帧末释放** —— 展示台必须在量包围盒之前真正消失，所以用 `remove_child()` + `free()`
 >    （先 detach 再 free，避免在自己子树回调里 free 自己）。
 > 4. **`AnimationPlayer 存在 ≠ 能播状态动画`** —— 判定要落到「`_state_clips` 里有没有匹配到 idle/walk/run」，

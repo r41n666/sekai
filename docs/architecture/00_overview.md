@@ -11,7 +11,7 @@
 
 | 维度 | 结论 |
 | --- | --- |
-| 引擎 / 栈 | Godot **4.7.2 stable** / Forward+ / GDScript / Jolt Physics / D3D12（Windows） |
+| 引擎 / 栈 | Godot **4.7.2 stable** / Forward+ / GDScript / Jolt Physics / Vulkan（Windows，**固定，勿改 D3D12**） |
 | 代码规模 | `scripts/` 下 **30 个 `.gd`**（实际，非 29；其中 `training_target.gd` 为已移出场景的遗留脚本） |
 | 架构风格 | **场景组合 + 场景组（group）+ 信号** 的松耦合；无 DI 框架、无 ECS、无全局事件总线 |
 | 解耦主轴 | **HUD / UI 与游戏逻辑之间不做硬引用**（`README §6.1`）—— 靠「组查找 + signal」双向解耦 |
@@ -34,7 +34,7 @@
 | 渲染后端 | Forward+ | `project.godot:20` |
 | 视口 | 1920×1080，`canvas_items` 拉伸 / `expand` 纵横 | `project.godot:30-33` |
 | 物理引擎 | `physics/3d/physics_engine = "Jolt Physics"` | `project.godot:145` |
-| Windows 驱动 | `rendering_device/driver.windows = "d3d12"` | `project.godot:149` |
+| Windows 驱动 | `rendering_device/driver.windows = "vulkan"`（**锁定，勿删**） | `project.godot:167` |
 | 抗锯齿 | TAA 开、MSAA 关、各向异性 ×8 | `project.godot:150-151`、`README §4` |
 | Environment | `high_quality_environment.tres`：ACES / Glow / SSAO / **SSR 96**（水面反射）/ 体积雾；**SDFGI 关闭** | `assets/environments/high_quality_environment.tres`、`README §4` |
 | Autoload | `MusicManager`、`NetworkManager` | `project.godot:25-26` |
