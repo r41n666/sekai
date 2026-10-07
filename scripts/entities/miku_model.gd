@@ -110,6 +110,15 @@ const HAND_BONE_BLOCK := ["捩", "指", "握り", "拡散", "先", "ik", "親", 
 ##     故默认不用。若将来把 bob / lean 幅度调大，或用于躯干运动更剧烈的动作，可再打开本开关。
 ## 仅在分层模式（procedural_legs_enabled 且 pose_arms=false）下才生效，不影响默认行为。
 @export var hold_ik_torso_anchor := false
+## 手指抓握开关（Spike 能力，见 `docs` 报告）。
+##
+## ⚠ 默认 **false** = 完全维持既有「手是五指张开的平面」行为（不破坏基线）。
+## 打开后：在双手 IK 持枪**生效时**，把 15 根指骨绕局部 X 轴弯到「握住枪」的角度
+## （右手 = 握把，左手 = 护木；见 `hand_grip.gd` 的实测依据）。
+## 与 `hold_ik_enabled` 的关系：**grip 只在 IK 生效时才应用**（空手 / 第一人称 / IK 关闭时不握拳）——
+## 否则空手也握拳、或第一人称看不见的手也在握，都很怪。故本开关单独存在只为「可单独回退」，
+## 实际生效需 `hold_ik_enabled` 同时为 true。
+@export var hand_grip_enabled := false
 
 ## 几何法找右手时的排除词（头发 / 裙子等辅助骨骼不能当手）与最低高度比例
 const HAND_SEARCH_BLOCK := [
@@ -182,12 +191,24 @@ func toggle_hold_ik() -> void:
 	set_hold_ik_enabled(not hold_ik_enabled)
 
 
+## 运行时开关手指抓握（纯本地演示开关，与 hold_ik 独立）。仅在 IK 生效时真正处理。
+func set_hand_grip_enabled(on: bool) -> void:
+	hand_grip_enabled = on
+	_sync_hold_ik()
+
+
+func toggle_hand_grip() -> void:
+	set_hand_grip_enabled(not hand_grip_enabled)
+
+
 ## 把「是否开 IK」同步到武器持有 / 第一人称状态：
 ## IK 只在「开关打开 + 正持械 + 第三人称 + 骨架可用」时生效，其余情况完全退回旧路径。
 func _sync_hold_ik() -> void:
 	if _hold_ik == null:
 		return
 	_hold_ik.set_enabled(hold_ik_enabled and _holding_weapon and not _first_person)
+	# 手指抓握由 WeaponHoldIK 内部再按「IK 是否生效」二次闸门（见 weapon_hold_ik.gd::_refresh）
+	_hold_ik.set_grip_enabled(hand_grip_enabled)
 
 
 ## 开镜 / 收镜时由 player.gd 调用：第一人称下武器跟着收进画面中心

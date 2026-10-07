@@ -32,6 +32,10 @@ extends RefCounted
 ## 目标节点是 **Skeleton3D 的子节点**，其 `position` 为**骨架空间**坐标（随角色变换自动跟随）。
 
 ## ── 骨骼名解析 ────────────────────────────────────────────────────────────
+## 手指抓握脚本（preload 而非全局 class_name：全局名依赖导入缓存，headless 首次运行解析不到）。
+const HandGripScript := preload("res://scripts/entities/hand_grip.gd")
+const HandGripModifierScript := preload("res://scripts/entities/hand_grip_modifier.gd")
+
 ## 部位关键字（小写「包含」匹配）。优先标准 Blender / Rigify 命名。
 const PART_KEYS := {
 	"upper": ["upper_arm", "upperarm", "upper arm"],
@@ -78,6 +82,11 @@ var _pole_l: Node3D
 var _pole_r: Node3D
 
 var _enabled := false
+## 手指抓握开关。**仅在 IK 生效时**才有意义（见 `set_grip_enabled`）：否则空手也握拳很怪。
+var grip_enabled := false
+## 左右手的手指抓握 modifier（在两条 IK 之后 add_child ⇒ 在 IK 之后运行）。
+var _grip_r
+var _grip_l
 ## 左右手触达误差（世界空间，米）。由 capture 脚本在 skeleton_updated 里回填，仅供调试。
 var reach_error := {}
 
@@ -243,6 +252,11 @@ func setup(skeleton: Skeleton3D, model: Node3D) -> bool:
 	if _ik_r == null or _ik_l == null:
 		return false
 
+	# 手指抓握：两条 IK **之后** add_child ⇒ 在同一骨架的 modifier 顺序里排在 IK 之后，
+	# 因此能读到 IK 改过的手骨姿态，再在其上弯手指（右手 = 握把，左手 = 护木）。
+	_grip_r = _make_grip("HandGrip_R", "r", HandGripScript.Role.GRIP, hand_r)
+	_grip_l = _make_grip("HandGrip_L", "l", HandGripScript.Role.FOREGRIP, hand_l)
+
 	debug_names = {
 		"upper_r": upper_r, "lower_r": lower_r, "hand_r": hand_r,
 		"upper_l": upper_l, "lower_l": lower_l, "hand_l": hand_l,
@@ -335,15 +349,29 @@ func _make_ik(node_name: String, upper: String, lower: String, hand: String,
 	return ik
 
 
+## 建一个手指抓握 modifier（挂在骨架下；由于在两条 IK 之后 add_child，运行顺序也在其后）。
+## 骨骼缺 15 根指骨时 `configure` 返回 false，modifier 保持 `valid=false`（静默不生效）。
+func _make_grip(node_name: String, side: String, role: int, hand_bone: String):
+	var grip = HandGripModifierScript.new()
+	grip.name = node_name
+	_skeleton.add_child(grip)
+	grip.active = false # 默认关（由 _refresh 按 _enabled & grip_enabled 决定）
+	grip.influence = 1.0
+	grip.configure(side, role, hand_bone)
+	return grip
+
+
 ## 拆掉本类建的所有节点（模型重载 / 关闭能力时调用）。
 func teardown() -> void:
 	if _torso != null and is_instance_valid(_torso):
 		_torso.queue_free() # 挂到躯干下的目标 / 极节点是它的子节点，随它一起释放
-	for n in [_ik_l, _ik_r, _target_l, _target_r, _pole_l, _pole_r]:
+	for n in [_ik_l, _ik_r, _grip_l, _grip_r, _target_l, _target_r, _pole_l, _pole_r]:
 		if n != null and is_instance_valid(n) and n.get_parent() != _torso:
 			n.queue_free()
 	_ik_l = null
 	_ik_r = null
+	_grip_l = null
+	_grip_r = null
 	_target_l = null
 	_target_r = null
 	_pole_l = null
@@ -355,10 +383,31 @@ func teardown() -> void:
 
 func set_enabled(on: bool) -> void:
 	_enabled = on and valid
+	_refresh()
+
+
+## 手指抓握开关。**仅在 IK 生效时**才真正处理（`grip_active = _enabled and grip_enabled`）：
+## 空手 / 第一人称 / IK 关闭时都不握拳。习惯用法：先 `set_enabled(true)` 再 `set_grip_enabled(true)`。
+func set_grip_enabled(on: bool) -> void:
+	grip_enabled = on
+	_refresh()
+
+
+func is_grip_enabled() -> bool:
+	return grip_enabled and _enabled
+
+
+func _refresh() -> void:
+	var grip_active: bool = _enabled and grip_enabled
 	for ik in [_ik_l, _ik_r]:
 		if ik != null and is_instance_valid(ik):
 			ik.active = _enabled
 			ik.influence = 1.0
+	for grip in [_grip_l, _grip_r]:
+		if grip != null and is_instance_valid(grip):
+			grip.active = grip_active and grip.is_valid()
+			grip.influence = 1.0
+
 
 
 func is_enabled() -> bool:

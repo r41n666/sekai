@@ -28,6 +28,7 @@ const SUITE_SCRIPTS: Array[String] = [
 	"res://tests/suites/test_combat_anim.gd",
 	"res://tests/suites/test_weapon_hold_ik.gd",
 	"res://tests/suites/test_procedural_legs_layer.gd",
+	"res://tests/suites/test_hand_grip.gd",
 ]
 
 
