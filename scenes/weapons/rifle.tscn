@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://scripts/shooting/weapon.gd" id="1_weapon"]
 [ext_resource type="Script" path="res://scripts/shooting/audio_3d.gd" id="2_gun_audio"]
-[ext_resource type="PackedScene" path="res://assets/models/weapons/m4a4.glb" id="3_model"]
+[ext_resource type="PackedScene" path="res://assets/models/weapons/ak47.glb" id="3_model"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_flash"]
 shading_mode = 0
@@ -19,7 +19,7 @@ rings = 4
 
 [node name="Rifle" type="Node3D"]
 script = ExtResource("1_weapon")
-display_name = "M4A4 突击步枪"
+display_name = "AK-47 突击步枪"
 
 [node name="Model" parent="." instance=ExtResource("3_model")]
 

@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://scripts/shooting/weapon.gd" id="1_weapon"]
 [ext_resource type="Script" path="res://scripts/shooting/audio_3d.gd" id="2_gun_audio"]
-[ext_resource type="PackedScene" path="res://assets/models/weapons/pink_pistol.glb" id="3_model"]
+[ext_resource type="PackedScene" path="res://assets/models/weapons/usp_cyrex.glb" id="3_model"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_flash"]
 shading_mode = 0

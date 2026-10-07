@@ -1,8 +1,9 @@
 extends Node
 ## 验收截图工具（改完武器外观 / 角色模型后跑一遍，图在 /tmp/accept，挑好的放进 docs/acceptance/）
 ##
-## 它把 main.tscn 拉起来，然后：四个武器槽各拍「第三人称 + 第一人称」→ 换回旧外观回归一遍
+## 它把 main.tscn 拉起来，然后：四个武器槽各拍「第三人称 + 第一人称」
 ## → 打开 Esc 菜单拍外观 / 皮肤 / 3D 检视 → 逐个切角色模型。
+## （原「旧外观回归」一段已随资源精简移除——每个槽只剩默认外观，无第二外观可比。）
 ##
 ## 运行（无头机要 xvfb；本机 Windows 直接 godot --path . res://tools/capture_acceptance.tscn）：
 ##   xvfb-run -a godot --path . res://tools/capture_acceptance.tscn --rendering-driver opengl3 --resolution 1280x720
@@ -11,12 +12,9 @@ const OUT_DIR := "res://_accept_tmp"
 ## 只想看这几个角色就改这里
 const CHARACTERS := [
 	"res://assets/models/miku/miku.glb",
-	"res://assets/models/miku_nightcord/miku_nightcord.glb",
 	"res://assets/models/miku_ps/miku_ps.glb",
 	"res://assets/models/miku_statue/miku_statue.glb",
 ]
-## 每个槽的「旧外观」（回归检查用）
-const ALT_VARIANTS := {"Rifle": "m4a4", "USP": "pink", "Knife": "hudidao", "Grenade": "porcelain"}
 
 var _main: Node3D
 var _player: Node
@@ -50,12 +48,8 @@ func _run() -> void:
 		_player._toggle_first_person()
 		await get_tree().create_timer(0.4).timeout
 	print("[acc] 1) 当前外观拍完")
-	for slot in ALT_VARIANTS:
-		_equip(slot)
-		_player.set_weapon_variant(slot, String(ALT_VARIANTS[slot]))
-		await get_tree().create_timer(0.8).timeout
-		await _shot("tp_alt_%s_%s" % [slot, ALT_VARIANTS[slot]])
-	print("[acc] 2) 旧外观回归拍完")
+	# 旧外观回归（ALT_VARIANTS）已移除：2026-10-07 资源精简删掉了所有「第二外观」，
+	# 每个槽现在只剩默认外观一条，没有可比对的旧外观了。
 	if _menu != null:
 		_menu.open_ui()
 		await get_tree().create_timer(0.6).timeout

@@ -1,7 +1,7 @@
 [gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/shooting/knife.gd" id="1_knife"]
-[ext_resource type="PackedScene" path="res://assets/models/weapons/butterfly_knife.glb" id="2_model"]
+[ext_resource type="PackedScene" path="res://assets/models/weapons/knife_fps.glb" id="2_model"]
 
 [node name="Knife" type="Node3D"]
 script = ExtResource("1_knife")

@@ -33,41 +33,27 @@ const VARIANTS := {
 			"muzzle": Vector3(0.0, 0.078, 0.45),
 			"view_offset": Vector3(0.18, -0.17, -0.6),
 		},
-		{
-			"id": "m4a4", "name": "M4A4", "display": "M4A4 突击步枪",
-			"path": "res://assets/models/weapons/m4a4.glb",
-			"transform": Transform3D.IDENTITY,
-			"muzzle": Vector3(0.0, 0.12, 0.557),
-			"view_offset": Vector3(0.17, -0.17, -0.55),
-		},
 	],
 	"USP": [
 		{
-			# 已校准（两次踩坑）：
-			# 坑 1「前后反 + 偏小」：glTF 内层节点链把模型摆成了「X = 枪管轴、-X 是枪口」，而旧值的基
-			#   把 after-inner +X 映到武器 +Z，等于枪口朝后；且旧 scale 是按整段 AABB（1782）算的，
-			#   而撑大它的 -X 侧那 ~1000 单位其实是 4 组浮空小圈（离群占位几何），所以枪又偏小。
-			# 坑 2「离群几何要按本地坐标裁」：4 组小圈和枪身同在一个 surface、按名字删不掉，只能用 trim；
-			#   但 trim 比的是**顶点本地坐标**（导入器把 ×100 缩放/换轴烘进顶点了），
-			#   本地 z 与 after-inner x 的关系是 x = 907.0024 − 100·z，所以取 z ≤ 11 正好切掉小圈、
-			#   保留主体（after-inner x −187.8~761.3，长 949.1），实测保留 11311 / 11985 个三角形。
-			# 校准结果：scale = 0.22 / 949.1 = 0.000232（枪长 0.22 m），主体中心归零，
-			#   after-inner X(枪管轴) → 武器 ∓Z、Y → +Y、Z → +X，枪口在 +Z 端 0.110、Muzzle 节点放 0.10 落在内侧。
+			# 已校准（2026-10-07 修正「USP 没有枪管」）：
+			# 旧版这里配过一条几何裁剪 `"trim": [null, null, [null, 11.0]]`，注释声称切掉「4 组浮空小圈」。
+			# 但渲染对比（tools/weapon_render_compare）+ 探针实测推翻了该判断：那 4 组「小圈」其实是
+			# **消音器上的环形分段**；裁掉本地 z>11 等于把整段消音器 + 枪管前端齐刷刷切掉
+			# （裁剪后只剩套筒前半截，看着就像"没有枪管"）。⇒ 删掉 trim，整枪（含消音器）完整保留。
+			# 长度复核：原文件全长 1782.64 单位；旧 scale=0.000232 是按**裁剪后**的 949 单位算的（0.22 m）。
+			#   同 scale 下未裁剪全长 = 1782.64 × 0.000232 ≈ 0.4135 m —— 正是**带消音器的 USP-S 真实长度**，
+			#   故 scale 保持不变，只用**未裁剪的完整包围盒**重新对中（origin 见下）。
+			# 轴映射：after-inner X(枪管轴) → 武器 ∓Z、Y → +Y、Z → +X；消音器在武器 +Z 端，枪口落在 +Z 端内侧。
+			# 实测（tools/_tmp_usp_probe，未裁剪整枪）：武器空间 bbox z −0.1102~0.3034（长 0.4136）、
+			#   中心 z=0.0966 → 把 origin.z 减去 0.0966 即主体中心归零（新 bbox z ≈ −0.2068~0.2068）。
+			#   消音器段（网格局部 z>11）bbox y 0.0392~0.0790（轴 y≈0.059）、z 0.1122~0.3034 → 是 0.04 径 × 0.19 长的圆筒。
+			#   Muzzle 放消音器尖端（+z 端 0.2068）内侧 0.01 ≈ z 0.197、取消音器轴高 y 0.059。
 			"id": "usp_cyrex", "name": "USP-S 赛睿", "display": "USP-S 手枪",
 			"path": "res://assets/models/weapons/usp_cyrex.glb",
 			"transform": Transform3D(Vector3(0.0, 0.0, -0.000232), Vector3(0.0, 0.000232, 0.0),
-					Vector3(0.000232, 0.0, 0.0), Vector3(0.013168, -0.035667, 0.066473)),
-			# 按**网格本地坐标** z ≤ 11 裁掉 4 组浮空小圈（详见上面的注释）
-			"trim": [null, null, [null, 11.0]],
-			"muzzle": Vector3(0.0, 0.033, 0.10),
-			"view_offset": Vector3(0.16, -0.16, -0.4),
-		},
-		{
-			"id": "pink", "name": "粉色 USP", "display": "粉色 USP",
-			"path": "res://assets/models/weapons/pink_pistol.glb",
-			"transform": Transform3D(Vector3(-0.08, 0.0, 0.0), Vector3(0.0, 0.08, 0.0),
-					Vector3(0.0, 0.0, -0.08), Vector3.ZERO),
-			"muzzle": Vector3(0.0, 0.0, 0.146),
+					Vector3(0.000232, 0.0, 0.0), Vector3(0.013168, -0.035667, -0.030127)),
+			"muzzle": Vector3(0.0, 0.059, 0.197),
 			"view_offset": Vector3(0.16, -0.16, -0.4),
 		},
 	],
@@ -80,7 +66,7 @@ const VARIANTS := {
 			#   导入后 Object_79 的包围盒是 0.0106(x) × 0.0392(y) × 0.3072(z)，刀尖在 +Z 的 0.1245、
 			#   刀尾在 -0.1826。所以 Model 根**只需要缩放 + 对中，不要再转**——
 			#   之前那版带旋转的基（y_axis=(0,0,s)）等于在已经摆正的刀上又转了 90°，刀躺到了 +Y 轴上。
-			#   按主体长 0.3072 重算 scale=0.9115（≈0.28 m，与 hudidao 蝴蝶刀一致），
+			#   按主体长 0.3072 重算 scale=0.9115（≈0.28 m，与已删除的 hudidao 蝴蝶刀一致），
 			#   对中平移 z=+0.02648（把 [-0.1826, 0.1245] 的中点挪到原点）。
 			"id": "knife_fps", "name": "FPS 蝴蝶刀（带翻刃）", "display": "蝴蝶刀",
 			"path": "res://assets/models/weapons/knife_fps.glb",
@@ -92,16 +78,6 @@ const VARIANTS := {
 			# 右下角外，所以把摆放往后推远一点、略抬高，和 AK-47 的第一人称取景对齐。
 			"view_offset": Vector3(0.18, -0.20, -0.56),
 		},
-		{
-			"id": "hudidao", "name": "蝴蝶刀（hudidao）", "display": "蝴蝶刀",
-			"path": "res://assets/models/weapons/butterfly_knife.glb",
-			# TODO 未校准：这把是 4 个 mesh、每个 mesh 内层旋转都不同的老资产（Box001/Box004/dft/Cylinder001），
-			# 现在的摆放没对中也没让刀身朝 +Z（tool 报 x 0.022~0.301 / z -0.141~-0.110）。留着回归用，
-			# 真要修得逐个 mesh 量内层链；暂时只把第一人称摆放跟 knife_fps 对齐，避免掉出画面。
-			"transform": Transform3D(Vector3(0.0, 0.0, 0.25), Vector3(0.25, 0.0, 0.0),
-					Vector3(0.0, 0.25, 0.0), Vector3(0.0, 0.0, -0.125)),
-			"view_offset": Vector3(0.18, -0.20, -0.56),
-		},
 	],
 	"Grenade": [
 		{
@@ -110,13 +86,6 @@ const VARIANTS := {
 			"transform": Transform3D(Vector3(0.0132, 0.0, 0.0), Vector3(0.0, 0.0132, 0.0),
 					Vector3(0.0, 0.0, 0.0132), Vector3(-0.0013, -0.058, 0.0157)),
 			"view_offset": Vector3(0.16, -0.18, -0.36),
-		},
-		{
-			"id": "porcelain", "name": "青花瓷手雷", "display": "青花瓷手雷",
-			"path": "res://assets/models/weapons/porcelain_grenade.glb",
-			"transform": Transform3D(Vector3(0.6, 0.0, 0.0), Vector3(0.0, 0.6, 0.0),
-					Vector3(0.0, 0.0, 0.6), Vector3.ZERO),
-			"view_offset": Vector3(0.16, -0.18, -0.34),
 		},
 	],
 }

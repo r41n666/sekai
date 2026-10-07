@@ -23,7 +23,7 @@ const WeaponHoldIKScript := preload("res://scripts/entities/weapon_hold_ik.gd")
 ## 判定方法：scripts/entities/model_facing_check.gd（或 tools 里同款离屏实拍：相机放 +Z 正前方，看到脸才对）。
 const MODEL_YAW_CORRECTION := {
 	"miku_statue": 180.0, # Sketchfab 雕塑：正面朝 -Z，实测 +Z 机位看到的是后脑（双马尾在后），补 180
-	"miku_classic": 180.0, # Sketchfab 导出：正面朝 -Z（+Z 机位看到后脑 / 双马尾在前），实测确认，补 180
+	# "miku_classic": 180.0 —— ⚠ 该模型已删（2026-10-07 资源精简）；若日后重新加回需重新登记
 }
 
 ## 逐模型「待机微动作」参数表（键 = 模型目录名；查不到用 DEFAULT_IDLE_PROFILE）。
@@ -524,7 +524,7 @@ func combat_movement_scale() -> float:
 ## 模型没有「可用的状态动画剪辑」时，退回到「程序化姿态」：把 T-pose 的胳膊放下来 + 走/跑/跳的摆动。
 ##
 ## 注意：判定条件是「有没有匹配到 idle/walk/run 剪辑」，而不是「有没有 AnimationPlayer」——
-## 有些模型（如 miku_classic 只有一条叫 "Take 01" 的动画）有 AnimationPlayer 但名字对不上任何状态，
+## 有些模型（如已删除的 miku_classic —— 它只有一条叫 "Take 01" 的动画）有 AnimationPlayer 但名字对不上任何状态，
 ## 如果只看 _anim != null 就会既不播动画、又不启用程序化姿态，角色僵在 T-pose。
 func _start_procedural_pose(model: Node) -> void:
 	_procedural = null
@@ -854,7 +854,7 @@ func _fit_to_capsule(model: Node, path: String) -> void:
 ##
 ## 目前是空的 —— 实测四个模型的自动缩放都已经合理，不需要补正：
 ##   模型            头顶骨 y   包围盒跨度   自动倍率   身体实际高度
-##   miku_classic      6.695      7.664      0.228      1.53 m
+##   miku_classic      6.695      7.664      0.228      1.53 m   ← ⚠ 该模型已删（2026-10-07 资源精简），此行留作历史记录
 ##   cat_hatsune       2.435      2.979      0.588      1.43 m
 ##   miku_statue       —（无骨骼，走网格包围盒）0.090     1.77 m
 ## 身体高度都在 1.4~1.8 m 区间，符合预期（曾试给 miku_classic 补 1.35，身体变 2.24 m，明显过大）。
@@ -937,7 +937,7 @@ func _strip_mmd_physics_proxies(model: Node) -> void:
 ## 只删**命中关键字**的节点（连同子树），其余一律保留。
 const MODEL_STRIP_PROPS := {
 	# Sketchfab 导出带整套展示台：Floor（6.8×6.8 白板）、Lamp / Lamp2（空节点）；Hairshadow 是头发投影片，角色身上不需要
-	"miku_classic": ["floor", "lamp", "hairshadow"],
+	# "miku_classic": ["floor", "lamp", "hairshadow"] —— ⚠ 该模型已删（2026-10-07 资源精简）
 	# cat_hatsune_miku 自带一块 Plane_001_122 平面（疑似底座），一并清掉
 	"cat_hatsune_miku": ["plane_001"],
 }
