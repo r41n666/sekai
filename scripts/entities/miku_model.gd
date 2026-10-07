@@ -12,6 +12,8 @@ class_name MikuModel
 ## 全局类名依赖 `.godot/global_script_class_cache.cfg`（需一次导入/开编辑器才登记），
 ## preload 则任何情况下都能解析，避免「新加的 class_name 在 headless 首次运行时找不到」。
 const WeaponHoldIKScript := preload("res://scripts/entities/weapon_hold_ik.gd")
+## UAL locomotion 驱动（preload 同理：全局 class_name 依赖导入缓存）。
+const UalLocomotionScript := preload("res://scripts/entities/ual_locomotion.gd")
 
 ## 模型路径（想用别的文件名就改这里）
 @export var model_path := "res://assets/models/miku/miku.glb"
@@ -119,6 +121,43 @@ const HAND_BONE_BLOCK := ["捩", "指", "握り", "拡散", "先", "ik", "親", 
 ## 否则空手也握拳、或第一人称看不见的手也在握，都很怪。故本开关单独存在只为「可单独回退」，
 ## 实际生效需 `hold_ik_enabled` 同时为 true。
 @export var hand_grip_enabled := false
+## UAL(Quaternius Universal Animation Library) locomotion 开关。
+##
+## ✅ **默认 true**（2026-10-07 按用户要求开启，用户实机验收项）。
+## 打开后：若当前模型是标准人形骨架（骨名与 `ual_bone_map.gd` 的映射表吻合，实测只有
+## `cat_hatsune_miku`），用**运行期pose-delta 重定向**驱动 **腿 + 躯干**，
+## 取代程序化步态（UAL 有真实的屈膝抬脚 + 身体起伏，程序化版近乎直腿摆动）。
+##
+## ⚠ **仍保留本开关**，随时可置 false 回退到纯程序化步态（Esc 菜单 / 调试键可改）。
+##   降级链完整：开关关 ⇒ 程序化姿态接管腿；UAL 素材缺失 / 骨架不匹配 ⇒同样回退程序化姿态，
+##   **绝不出现「没腿」**。
+## ⚠ 默认打开**不影响默认模型** `miku.glb`：它的骨名是乱码，骨映射配不出驱动骨
+##   ⇒ `is_ual_locomotion_active()` 恒false ⇒ 照旧由 MikuProceduralPose 接管腿
+##   （守护用例：`test_ual_switch_on_does_not_disturb_default_model`）。
+##
+## ## 手臂归属（本开关**不**碰手臂）
+##   · 持枪 → `WeaponHoldIK`（双臂）+ `HandGripModifier`（手指）；
+##   · 空手 → UAL 驱动手臂（实测决策：cat 的 rest 是 T-pose，空手无人接管会笔直平举穿帮；
+##     详见 `ual_locomotion.gd` 文件头）。
+##
+## ## 与 `procedural_legs_enabled` 的关系：**互斥，二选一**
+## UAL 有效 ⇒ **不建**程序化姿态（避免两层同时写腿骨）；UAL 无效 ⇒ 自动回退程序化姿态。
+## 因此**不需要**同时打开 `procedural_legs_enabled`。
+@export var ual_locomotion_enabled := true
+## UAL 冲刺档的速度比例阈值（>= 走 Sprint 剪辑）。
+##
+## ⚠ 默认 **1.1 = 故意让冲刺档「够不到」**（2026-10-07 按用户要求：
+##   「双马尾穿帮可以按『开着但 sprint 够不到』来配」）。
+## 依据（实测，不是猜的）：`speed_ratio` 的定义与量纲见 `player.gd:299`
+##   `anim_ratio := clampf(move_speed / maxf(sprint_speed, 0.1), 0.0, 1.0)`
+##   ——分母是 `sprint_speed`（6.5），且**被 clamp 到 [0, 1]**⇒ **值域恒为 [0, 1]、上界 1.0**。
+##   阈值取 1.1 > 1.0 ⇒ `select_state` 里的 `speed_ratio >= sprint_threshold`
+##   **永远为假** ⇒ Sprint 剪辑永不播放（仍注册在表里，随时可调回 ≤1.0 启用）。
+##   ⇒ 双马尾穿帮的根源动作（大动作 Sprint）被排除在实机可达范围之外。
+@export var ual_sprint_threshold := 1.1
+## UAL 接管时，手臂归属在「UAL」↔「IK」之间切换的**渐变时长**（秒）。
+## 取 0.18 与既有 `fade_time` 一致。设为 0 可退回「硬切」（不建议）。
+const UAL_ARM_BLEND_TIME := 0.18
 
 ## 几何法找右手时的排除词（头发 / 裙子等辅助骨骼不能当手）与最低高度比例
 const HAND_SEARCH_BLOCK := [
@@ -142,6 +181,9 @@ var _first_person := false
 var _loaded_model: Node
 var _anim: AnimationPlayer
 var _procedural: MikuProceduralPose
+## UAL locomotion 驱动（可切换能力；见 ual_locomotion.gd）。素材缺失 / 骨架不匹配时 valid=false，
+## 此时**由 `_start_procedural_pose` 回退 MikuProceduralPose**（绝不出现「没腿」）。
+var _ual_loco
 ## 双手持枪 IK（可切换能力；见 weapon_hold_ik.gd）。骨架不达标时为 null。
 var _hold_ik
 var _state_clips: Dictionary = {} # idle / walk / run / jump -> 动画名
@@ -197,6 +239,23 @@ func set_hand_grip_enabled(on: bool) -> void:
 	_sync_hold_ik()
 
 
+## 运行时切换蹲/站姿态（由 player.gd 的 `_update_stance` 每帧转发）。
+##
+## 只影响**动画**（UAL locomotion 换蹲姿剪辑）；**不影响位移** ——
+## 蹲下的碰撞体高度 / 视角高度 / 模型 Y 偏移仍由 `player.gd::STANCE_HEIGHTS` 等负责
+## （那些是碰撞与视角需要的，与姿态是两件事，两者不打架）。
+## UAL 无效时本方法静默无效果（此时蹲姿由 MikuProceduralPose / 剪辑自行表现）。
+func set_crouched(on: bool) -> void:
+	if _ual_loco != null:
+		_ual_loco.set_crouched(on)
+
+
+## UAL locomotion 当前是否**真的**在驱动腿 + 躯干（= 开关打开且素材 / 骨架都就绪）。
+## 素材缺失或骨架不匹配时为 false —— 此时腿部由 `MikuProceduralPose` 接管。
+func is_ual_locomotion_active() -> bool:
+	return _ual_loco != null and _ual_loco.valid
+
+
 func toggle_hand_grip() -> void:
 	set_hand_grip_enabled(not hand_grip_enabled)
 
@@ -209,6 +268,20 @@ func _sync_hold_ik() -> void:
 	_hold_ik.set_enabled(hold_ik_enabled and _holding_weapon and not _first_person)
 	# 手指抓握由 WeaponHoldIK 内部再按「IK 是否生效」二次闸门（见 weapon_hold_ik.gd::_refresh）
 	_hold_ik.set_grip_enabled(hand_grip_enabled)
+	_sync_ual_arm_ownership()
+
+
+## 手臂归属同步：**IK 接管手臂时让出，空手时由 UAL 驱动**。
+##
+## ⚠ 为什么必须这样做（实测踩过的坑）：UAL 有效时程序化姿态是**关闭**的（两者互斥），
+##   若 UAL 再无条件排除手臂，空手时就**没有任何东西驱动手臂** ⇒ cat 的 rest = T-pose
+##   ⇒ 空手走路手臂笔直平举（截图证据：tmp_spike/loco_ual_walk_1.png）。
+## ⇒ 规则很简单：**IK 生效 ⇒ UAL 让出手臂；否则 UAL 驱动手臂**。
+func _sync_ual_arm_ownership() -> void:
+	if _ual_loco == null or not _ual_loco.valid:
+		return
+	var ik_owns_arms: bool = _hold_ik != null and _hold_ik.is_enabled()
+	_ual_loco.set_arms_driven(not ik_owns_arms)
 
 
 ## 开镜 / 收镜时由 player.gd 调用：第一人称下武器跟着收进画面中心
@@ -234,6 +307,9 @@ func set_first_person(on: bool) -> void:
 func _process(delta: float) -> void:
 	_update_idle_intensity(delta)
 	_tick_combat_clip(delta)
+	# IK 的 influence 渐变（持枪⇄ 空手换驱动者时消跳变；blend_time=0 时本方法空转）
+	if _hold_ik != null:
+		_hold_ik.tick(delta)
 	if _weapon_mount == null:
 		return
 	if _first_person:
@@ -418,6 +494,13 @@ func _lowest_y_under(node: Node, parent_xform: Transform3D) -> float:
 
 ## 每帧由 player.gd 调用：有动画剪辑就切动画；没有剪辑时用程序化姿态（摆放骨骼）
 func update_animation(delta: float, speed_mps: float, speed_ratio: float, moving: bool, on_floor: bool) -> void:
+	# UAL locomotion 有效时：它接管腿 + 躯干，**直接返回**——
+	# 既不跑程序化姿态（互斥），也不让 AnimationPlayer 切状态（cat 自带剪辑是 T-pose 定格，
+	# 让它播会把 UAL 辛苦算出的腿部姿态覆盖掉）。
+	if _ual_loco != null and _ual_loco.valid:
+		_ual_loco.update(delta, speed_mps, speed_ratio, moving, on_floor,
+			run_threshold, ual_sprint_threshold)
+		return
 	if _procedural != null:
 		_procedural.update(delta, speed_mps, moving, speed_ratio >= run_threshold, on_floor)
 		# 分层模式（pose_arms=false）：程序化只驱动腿，**继续往下切动画**，
@@ -440,9 +523,147 @@ func update_animation(delta: float, speed_mps: float, speed_ratio: float, moving
 	var clip: String = _state_clips.get(state, "")
 	if clip == "":
 		clip = _state_clips.get("idle", "") # 缺某个动画时退回 idle，仍然能玩
-	if clip == "" or _anim.current_animation == clip:
+	# ⚠⚠ **退化剪辑绝不 play()** —— 这是「轻微抽搐」的根因修复。
+	# 退化剪辑（如 cat 的 0.083 s 定格）一旦被播，就会以 12 Hz 反复重写全身骨骼姿态，
+	# 与 IK / 程序化姿态 / UAL **抢同一批骨** ⇒ 胸骨偏航在 0°↔17° 之间锯齿抖动
+	# （窗口模式实测：f03~f24 逐帧 yaw = 0.0 / 2.3 / 8.7 / 17.2 / **0.0** …）。
+	# 判定按**实际取到的剪辑名**（不是状态名），因为上面有一条「缺状态剪辑就退回 idle」的路径。
+	if clip == "" or _clip_is_degenerate(clip):
+		return
+	if _anim.current_animation == clip:
 		return
 	_anim.play(clip, fade_time)
+
+
+# ---------------------------------------------------------------------------
+# 退化剪辑（degenerate clip）判定 —— 「播完等于没播」的剪辑
+# ---------------------------------------------------------------------------
+## ## 为什么要按**内容**而不是名字判定
+## 某些模型（实测 `cat_hatsune_miku`）带一条叫 `idle` 的剪辑，但它是
+## **0.083 s 的定格**：98 条骨骼轨道里**只有 1 条**会动（`chest_94` 的偏航 0°→19.7°），
+## 双腿骨**一条轨道都没有** ⇒ 播起来就是全身 T-pose 且纹丝不动。
+## ⚠ 所以**不能**按「名字含 idle 就跳过」—— 那只对这一份资源成立，
+## 换一份「叫 walk 但同样是定格」的剪辑就会漏判。
+##
+## ## 判据（两个条件**同时**成立才算退化）
+##   ① 时长 < `DEGENERATE_MIN_LENGTH`（0.2 s）；
+##   ② 会动的骨骼轨道占比 < `DEGENERATE_MIN_MOTION_RATIO`（15%）。
+##
+## ## 阈值是怎么定的（实测数据，`tools/probe_tpose.gd` / `tools/probe_idle_clip.gd`）
+##   | 剪辑                 | 时长   | 会动轨道 / 总轨道 | 占比   | 判定 |
+##   |----------------------|--------|-------------------|--------|------|
+##   | cat `idle`（定格）   | 0.083s | 1 / 98| **1.0%**  | 退化 |
+##   | cat `ArmatureAction` | 2.500s | 87 / 98           | 88.8%  | 正常 |
+##   阈值取在两者中间（1.0% ↔ 88.8% ⇒ 15% 有约 15× / 6× 的双向余量），
+##   因此对「几乎不动」与「正常动」两类都有很强的鉴别力，不是勉强过关。
+##   时长阈值同理：0.083 s ↔ 0.667 s（UAL 最短的真实 locomotion 剪辑 Sprint），
+##   0.2 s 落在中间（2.4× / 3.3× 余量）。
+##
+## ## 为什么用「轨道占比」而不是「首尾位移差」
+## 首尾差值对**非循环**剪辑会误判（起点 ≠ 终点本来很正常），而轨道占比与首尾无关，
+## 问的是「这条剪辑有没有真的在动**哪些骨**」—— 这才是状态机关心的事。
+const DEGENERATE_MIN_LENGTH := 0.2
+const DEGENERATE_MIN_MOTION_RATIO := 0.15
+## 单条轨道「算动了」的门槛：位移 > 1e-6 m（= 1 微米，肉眼绝不可见）
+## 或旋转 > 0.05°（比任何渲染抖动都小两个数量级）。
+const DEGENERATE_EPS_POS := 1e-6
+const DEGENERATE_EPS_ROT_DEG := 0.05
+
+
+## 量化一条剪辑「动了多少」：**纯函数**，只读 `Animation` 的数据、不碰场景 ⇒ headless 可断言。
+##
+## @return `{tracks, moving, ratio, max_pos, max_rot_deg, length}`：
+##   · `tracks` —— 该剪辑里**变换类**（位置/旋转/缩放）轨道总数（骨骼动画即骨数）；
+##   · `moving` —— 其中「真的动了」的轨道数（同一条轨道内任意两个 key 的差超阈值即算动）；
+##   · `ratio` = `moving / tracks`（`tracks == 0` 时为 0）。
+static func measure_clip_motion(clip: Animation) -> Dictionary:
+	if clip == null:
+		return {"tracks": 0, "moving": 0, "ratio": 0.0, "max_pos": 0.0,
+			"max_rot_deg": 0.0, "length": 0.0}
+	var tracks := 0
+	var moving := 0
+	var max_pos := 0.0
+	var max_rot_deg := 0.0
+	for track in clip.get_track_count():
+		var ttype := clip.track_get_type(track)
+		if ttype != Animation.TYPE_POSITION_3D and ttype != Animation.TYPE_ROTATION_3D \
+				and ttype != Animation.TYPE_SCALE_3D:
+			continue # 只看变换类轨道；TYPE_BEZIER / TYPE_METHOD / TYPE_BLEND_SHAPE 等忽略
+		tracks += 1
+		var keys := clip.track_get_key_count(track)
+		if keys < 2:
+			continue # 单 key 轨道 = 恒定值，天然不动
+		var has_motion := false
+		for k in keys:
+			for j in range(k + 1, keys):
+				var ka: Variant = clip.track_get_key_value(track, k)
+				var kb: Variant = clip.track_get_key_value(track, j)
+				if ttype == Animation.TYPE_ROTATION_3D:
+					var deg := rad_to_deg(Quaternion(ka).angle_to(Quaternion(kb)))
+					max_rot_deg = maxf(max_rot_deg, deg)
+					if deg > DEGENERATE_EPS_ROT_DEG:
+						has_motion = true
+				else:
+					var dist := (Vector3(ka) - Vector3(kb)).length()
+					max_pos = maxf(max_pos, dist)
+					if dist > DEGENERATE_EPS_POS:
+						has_motion = true
+		if has_motion:
+			moving += 1
+	return {
+		"tracks": tracks,
+		"moving": moving,
+		"ratio": float(moving) / float(tracks) if tracks > 0 else 0.0,
+		"max_pos": max_pos,
+		"max_rot_deg": max_rot_deg,
+		"length": clip.length,
+	}
+
+
+## 这条剪辑是不是「退化」的（= 播完等于没播，不配当状态动画）。
+##
+## **纯函数**：只吃 `Animation` 的数据，不读场景、不看名字 ⇒ 可在 headless 逐值断言。
+## ⚠ 判据**只看内容**（时长 + 有多少骨真的动了），**不看剪辑名** ——
+##   名字判据（「含 idle 就跳过」）只对当前这一份资源成立，换个资源就漏判。
+## @param clip 待判定的剪辑；`null` 视为退化（= 没有可用动画）。
+## @param min_length 时长上限（秒），达到它就一定不算退化。
+## @param min_motion_ratio 会动轨道占比下限，低于它才算「几乎不动」。
+static func is_degenerate(clip: Animation, min_length: float = DEGENERATE_MIN_LENGTH,
+		min_motion_ratio: float = DEGENERATE_MIN_MOTION_RATIO) -> bool:
+	if clip == null:
+		return true
+	if clip.length >= min_length:
+		return false # 时长够长的一律不算退化（哪怕动作很少，也仍是有效动画）
+	return float(measure_clip_motion(clip)["ratio"]) < min_motion_ratio
+
+
+## 退化剪辑名集合（`_build_state_clips` 填一次，`update_animation` 与
+## `_start_procedural_pose` 共用**同一份结论**，保证两处判断永不打架）。
+##
+## ⚠ 键是**剪辑名**而不是状态名：因为 `update_animation` 有一条
+##   「缺某个状态的剪辑就退回 idle」的路径，若按状态名判定，
+##   「walk 无剪辑→ 退回 idle」会被算成「walk 退化」而误拒掉一个**可用的** idle。
+var _degenerate_clips: Dictionary = {}
+
+
+## 这个**剪辑**是不是退化的。未收录（= 没被选为状态剪辑）时返回 false。
+func _clip_is_degenerate(clip: String) -> bool:
+	if clip == "":
+		return true
+	return bool(_degenerate_clips.get(clip, false))
+
+
+## 模型里有没有**非退化**的状态剪辑（idle / walk / run / jump 任一）。
+## ⚠ 这才是「能不能交给 AnimationPlayer 全权接管」的判据 ——
+##   早期版本只问「有没有匹配到剪辑」，于是 cat 的 0.083 s 定格被当成有效 idle，
+##   程序化姿态永不启用 ⇒ 全身 T-pose 且一动不动（用户实机确认的现象）。
+func _has_usable_state_clip() -> bool:
+	for state in ["idle", "walk", "run", "jump"]:
+		var clip := String(_state_clips.get(state, ""))
+		if clip == "" or _clip_is_degenerate(clip):
+			continue
+		return true
+	return false
 
 
 # ---------------------------------------------------------------------------
@@ -542,27 +763,52 @@ func combat_movement_scale() -> float:
 	return MikuCombatAnim.new().movement_scale()
 
 
-## 模型没有「可用的状态动画剪辑」时，退回到「程序化姿态」：把 T-pose 的胳膊放下来 + 走/跑/跳的摆动。
+## 模型没有「**可用的**状态动画剪辑」时，退回到「程序化姿态」：把 T-pose 的胳膊放下来 + 走/跑/跳的摆动。
 ##
-## 注意：判定条件是「有没有匹配到 idle/walk/run 剪辑」，而不是「有没有 AnimationPlayer」——
-## 有些模型（如已删除的 miku_classic —— 它只有一条叫 "Take 01" 的动画）有 AnimationPlayer 但名字对不上任何状态，
-## 如果只看 _anim != null 就会既不播动画、又不启用程序化姿态，角色僵在 T-pose。
+## ⚠ 判定用的是 `_has_usable_state_clip()` ——「有没有**非退化**的idle/walk/run/jump 剪辑」，
+## 而**不是**「有没有 AnimationPlayer」，也不是「有没有匹配到 idle/walk/run 剪辑」。
+## 两个反例（都是本项目实测踩过的）：
+##   · `cat_hatsune_miku`：有 idle 剪辑，但它 0.083 s、98 条轨道只有 1 条会动 ⇒
+##     **退化**（= T-pose 定格）。按旧判据会直接 return，于是程序化姿态永不启用
+##     ⇒ 全身 T-pose 且一动不动（用户实机确认的现象）。
+##   · 已删除的 `miku_classic`：有 AnimationPlayer，但名字对不上任何状态关键字。
+##     只看 `_anim != null` 就会既不播动画、又不启用程序化姿态，同样僵在 T-pose。
 func _start_procedural_pose(model: Node) -> void:
 	_procedural = null
-	# 只有真的能播状态动画时才交给动画剪辑；否则一律尝试程序化姿态做兜底。
-	var has_state_clip := false
-	for state in ["idle", "walk", "run", "jump"]:
-		if String(_state_clips.get(state, "")) != "":
-			has_state_clip = true
-			break
-	if has_state_clip:
-		# 既有行为：有状态剪辑 → 全交给 AnimationPlayer，不启用程序化姿态。
+	# —— 第一步：试 UAL locomotion（腿 + 躯干）。成功则**不建**程序化姿态（两者互斥）。
+	# 这一步必须先于下面的「有没有可用状态剪辑」判定：cat 自带的退化 idle 剪辑会让程序化姿态永不启用，
+	# 而那个 idle 播起来就是 T-pose ⇒ 不接 UAL、也不建程序化姿态时角色就完全没有腿的动作。
+	if _try_start_ual_locomotion(model):
+		return
+	if _has_usable_state_clip():
+		# 既有行为：有**可用的**状态剪辑 → 全交给 AnimationPlayer，不启用程序化姿态。
 		# 例外（新增，默认关）：procedural_legs_enabled 时让程序化姿态**只接管腿 + 躯干**，
 		# 手臂留给剪辑 / IK —— 解决「idle 是 T-pose 定格、除手臂外全身不动」的模型（cat_hatsune_miku）。
 		if procedural_legs_enabled:
 			_build_procedural_pose(model, false, true)
 		return
 	_build_procedural_pose(model, true, false)
+
+
+## 尝试启用 UAL locomotion。成功返回 true（此时 `_ual_loco.valid == true` 且**没有**程序化姿态）。
+##
+## 降级语义（关键）：任何一步失败都返回 false，调用方随即走**原有的程序化姿态路径**——
+## 因此「素材缺失 / 骨架不匹配 / 加载失败」都不会让角色失去腿部动作（绝不掉进「没腿」状态）。
+func _try_start_ual_locomotion(model: Node) -> bool:
+	_ual_loco = null
+	if not ual_locomotion_enabled:
+		return false
+	var skeleton := _find_skeleton(model)
+	if skeleton == null:
+		return false
+	var ual = UalLocomotionScript.new()
+	if not ual.setup(skeleton, self):
+		# setup 失败时它已经 warning 过原因；交回程序化姿态。
+		ual.teardown()
+		return false
+	_ual_loco = ual
+	print("MikuModel：已启用 UAL locomotion（腿 + 躯干；手臂归 IK / 程序化姿态） ", ual.debug_names)
+	return true
 
 
 ## 建立程序化姿态。`arms=true` = 全程序化（腿 + 手臂 + 躯干；无剪辑模型的兜底路径）；
@@ -597,6 +843,9 @@ func _start_hold_ik(model: Node) -> void:
 	# 分层模式（程序化姿态已启用且不接管手臂）→ 把握持点挂到躯干上，随骨盆的 lean / bob 一起走，
 	# 避免「躯干动了、目标点不动、手臂被拉扯」的基准冲突。
 	ik.attach_targets_to_torso = hold_ik_torso_anchor and _procedural != null and not _procedural.pose_arms
+	# ⚠ UAL 接管时手臂归属会在「UAL」↔「IK」之间换人 ⇒ 开 influence 渐变消跳变。
+	#   blend_time = 0 时WeaponHoldIK 行为与改动前完全一致（不破坏基线与既有测试）。
+	ik.blend_time = UAL_ARM_BLEND_TIME if _ual_loco != null and _ual_loco.valid else 0.0
 	if ik.setup(skeleton, self):
 		_hold_ik = ik
 		_sync_hold_ik()
@@ -608,6 +857,11 @@ func _clear_loaded_model() -> void:
 	if _idle_motion != null and is_instance_valid(_idle_motion):
 		_idle_motion.queue_free()
 	_idle_motion = null
+	# ⚠ UAL 源实例同样挂在 MikuModel 下（不随模型骨架释放），必须在这里 teardown。
+	#   teardown 还会 reset 写过的骨骼姿态，否则切模型后残留姿态会留在旧骨架上。
+	if _ual_loco != null:
+		_ual_loco.teardown()
+		_ual_loco = null
 	# 双手 IK 的 modifier / 目标节点挂在骨架下，会随骨架一起释放；这里只清引用
 	if _hold_ik != null:
 		_hold_ik.teardown()
@@ -621,6 +875,7 @@ func _clear_loaded_model() -> void:
 	_anim = null
 	_procedural = null
 	_state_clips.clear()
+	_degenerate_clips.clear()
 	_combat_clips.clear()
 	_combat_playing = false
 	_combat_clip_left = 0.0
@@ -685,6 +940,7 @@ func _visible_weapon() -> Node3D:
 
 func _build_state_clips() -> void:
 	_state_clips.clear()
+	_degenerate_clips.clear()
 	if _anim == null:
 		return
 	var names: Array[String] = []
@@ -698,11 +954,20 @@ func _build_state_clips() -> void:
 	_combat_clips["hit"] = _match_clip(names, hit_keys)
 	_combat_clips["death"] = _match_clip(names, death_keys)
 	_combat_clips["reload"] = _match_clip(names, reload_keys)
-	for state in ["idle", "walk", "run"]:
+	for state in ["idle", "walk", "run", "jump"]:
 		var clip: String = _state_clips.get(state, "")
 		if clip == "":
 			continue
 		var animation := _anim.get_animation(clip)
+		var degenerate := is_degenerate(animation)
+		if degenerate:
+			_degenerate_clips[clip] = true
+			# 退化剪辑**绝不**设成循环：0.083 s 的定格一旦循环，就是 12 Hz 的
+			# 全身姿态重写（实测胸骨偏航在 0°↔17° 之间锯齿抖动 = 用户说的「轻微抽搐」）。
+			print("MikuModel：状态剪辑 %s（%s）判定为**退化**（时长 %.3f s / 会动轨道占比 %.1f%%）⇒ 不播它" % [
+				clip, state, animation.length if animation != null else 0.0,
+				100.0 * float(measure_clip_motion(animation)["ratio"])])
+			continue
 		if animation != null:
 			animation.loop_mode = Animation.LOOP_LINEAR
 	_anim.stop() # 模型自带的自动播放交给状态机接管

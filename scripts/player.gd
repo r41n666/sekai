@@ -323,6 +323,11 @@ func _update_stance(delta: float) -> void:
 	#   之前是 -1.45（≈ -83°），会把正面转到 +Y、头转到 -Z（仰面朝天、头朝后），方向整个反了。
 	var target_tilt := PI * 0.5 if _stance == 2 else 0.0
 	_model.rotation.x = lerpf(_model.rotation.x, target_tilt, k)
+	# 蹲姿**动画**交给 MikuModel → UAL locomotion 换蹲姿剪辑（Crouch_Idle / Crouch_Fwd）。
+	# ⚠ 与上面的位移实现**分工**：这里只管「姿态」（大腿屈不屈），
+	#   STANCE_HEIGHTS / _camera_pivot 只管「位移与视角」（碰撞体多高、镜头多低）。
+	#   两者作用在不同对象上（MikuModel 节点变换 vs 骨骼姿态），因此互不打架。
+	_model.set_crouched(_stance == 1)
 	if _stance == 2:
 		# 贴地：各模型厚度 / 程序化姿态 / 骨骼差异太大，写死常数会悬空或穿地。
 		# 闭环修正——量出「当前模型最低点相对玩家原点的高度差」，直接把 MikuModel 推回去。

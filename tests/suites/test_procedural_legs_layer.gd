@@ -182,16 +182,57 @@ func test_layered_switches_default_off() -> void:
 	model.free()
 
 
-## 无 idle 剪辑的模型（走全程序化路径）必须**不**受影响：pose_arms 仍为 true。
-## 用真实资产路径断言：cat 有 idle 剪辑，但 procedural_legs_enabled=false 时不得启用分层。
+## `procedural_legs_enabled=false`（默认）时，**不得**启用「分层」模式
+## （`pose_arms == false` 的那种）。
+##
+## ⚠ 本用例在 2026-10-07 改过断言方向，原因是一次**真实缺陷**（不是重构）：
+##   原断言是「cat 有 idle 剪辑 ⇒ 默认不启用程序化姿态」，而cat 的 idle 剪辑经实测
+##   是 **0.083 s 的 T-pose 定格**（98 条骨骼轨道只有 1 条会动，双腿骨一条轨道都没有）。
+##   那条断言等于**把 T-pose 当成正确行为锁住** —— 用户实机看到的就是「cat 模型 T-pose 不动」。
+##   修复引入「退化剪辑」判据后，cat 的 idle 被判为退化 ⇒ 没有可用状态剪辑
+##   ⇒ **回退到全程序化姿态**（`pose_arms = true`）才是正确行为。
+##   ⇒ 断言改为锁「**默认不是分层模式**」这一真正的不变量（分层仍需显式开关），
+##      同时锁「退化 idle 确实被判退化」，让这个修复不会被静默回退。
 func test_default_does_not_enable_layered_for_cat() -> void:
 	var model := MikuModel.new()
 	model.model_path = CAT_MODEL
 	model.procedural_legs_enabled = false # 默认
 	model.hold_ik_enabled = true
+	# ⚠ UAL 现在默认 true（2026-10-07 按用户要求），它与程序化姿态**互斥**、
+	#   且优先级更高 ⇒ 想验「程序化姿态这条路径」必须先显式关掉 UAL。
+	#   （这本身就是一条不变量：两个驱动者不得同时存在，见下一条断言。）
+	model.ual_locomotion_enabled = false
 	add_child(model)
-	# 有 idle 剪辑 → 既有行为：走 AnimationPlayer，不启用程序化姿态
-	check_true(model._procedural == null, "默认（procedural_legs_enabled=false）下 cat 不得启用程序化姿态")
+	check_false(model.is_ual_locomotion_active(), "前置：本用例要验程序化路径，UAL 必须关闭")
+	# 前置：cat 的 idle 剪辑必须被判为「退化」（这是本次修复的核心判据）
+	check_true(model._clip_is_degenerate(String(model._state_clips.get("idle", ""))),
+		"cat 的 idle（0.083 s / 会动轨道 1.0%）必须被判为退化剪辑")
+	# 默认不得进入「分层」模式（pose_arms=false 要显式开 procedural_legs_enabled 才有）
+	check_true(model._procedural == null or model._procedural.pose_arms,
+		"默认（procedural_legs_enabled=false）下不得启用**分层**模式（pose_arms 必须为 true）")
+	# 修复后的正确行为：因无可用状态剪辑 ⇒ 回退全程序化姿态，角色不再 T-pose
+	check_true(model._procedural != null and model._procedural.valid,
+		"cat 的唯一状态剪辑退化 ⇒ 必须回退 MikuProceduralPose（否则角色僵在 T-pose）")
+	model.queue_free()
+
+
+## UAL 与程序化姿态**互斥**：两者都是「腿的驱动者」，同时存在就会抢同一批骨。
+## ⚠ 这条在 UAL 默认改为 true 之后更重要了 —— 以前默认关，几乎撞不上；
+##   现在默认开，必须确保「UAL 有效时程序化姿态压根没被建」。
+func test_ual_and_procedural_never_coexist_on_cat() -> void:
+	var model := MikuModel.new()
+	model.model_path = CAT_MODEL
+	# UAL 走默认（true）
+	add_child(model)
+	check_true(model.is_ual_locomotion_active(), "前置：UAL 默认应已接管（用户要求开启）")
+	check_true(model._procedural == null,
+		"UAL 有效时不得同时建程序化姿态（两者都写腿骨 ⇒ 会互抢）")
+	# 反向：关掉 UAL ⇒ 必须由程序化姿态接管（绝不出现「没腿」）
+	model.ual_locomotion_enabled = false
+	model.load_model(CAT_MODEL)
+	check_false(model.is_ual_locomotion_active(), "关闭后 UAL 不得接管")
+	check_true(model._procedural != null and model._procedural.valid,
+		"UAL 关闭后必须有程序化姿态接管腿（绝不出现「没腿」）")
 	model.queue_free()
 
 

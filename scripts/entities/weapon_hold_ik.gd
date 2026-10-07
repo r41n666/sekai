@@ -383,7 +383,51 @@ func teardown() -> void:
 
 func set_enabled(on: bool) -> void:
 	_enabled = on and valid
+	_target_enabled = _enabled
+	if blend_time <= 0.0:
+		# 既有行为：**立即**生效（不改变任何既有观感 / 测试口径）
+		_influence = 1.0 if _enabled else 0.0
+		_apply_ik(_influence)
 	_refresh()
+
+
+## 手臂归属切换的**渐变时长**（秒）。
+##
+## ⚠ 默认 **0 = 立即生效**（完全保持既有行为，不破坏基线）。
+## 什么时候需要 > 0：当手臂的驱动者在两套系统之间**换人**时，硬切会跳变。
+##   本项目的场景：UAL locomotion 空手时由**它**驱动手臂、持枪时让给本类 IK
+##   （见 `ual_locomotion.gd` 的「手臂所有权」）⇒ 持枪↔空手来回切会硬切。
+##   把 `influence` 在 `blend_time` 内从 0 渐变到 1（或反向）即可消除该跳变 ——
+##   Godot 的 `SkeletonModifier3D.influence` 本就是「修改量与原姿态的混合权重」。
+## 需由调用方每帧调 `tick(delta)` 推进。
+var blend_time := 0.0
+var _target_enabled := false
+var _influence := 0.0
+
+
+## 推进 influence 渐变（由 MikuModel 每帧调用）。
+func tick(delta: float) -> void:
+	if blend_time <= 0.0:
+		return
+	var target := 1.0 if _target_enabled else 0.0
+	if is_equal_approx(_influence, target):
+		return
+	var step := delta / maxf(blend_time, 0.0001)
+	_influence = move_toward(_influence, target, step)
+	_apply_ik(_influence)
+
+
+## 当前 IK 影响权重（0~1；调试 / 测试可读）。
+func get_influence() -> float:
+	return _influence
+
+
+## 把权重写进两条 TwoBoneIK3D（`influence == 0` 时同时关掉 active，省一次骨架更新）。
+func _apply_ik(weight: float) -> void:
+	for ik in [_ik_l, _ik_r]:
+		if ik != null and is_instance_valid(ik):
+			ik.active = weight > 0.001
+			ik.influence = weight
 
 
 ## 手指抓握开关。**仅在 IK 生效时**才真正处理（`grip_active = _enabled and grip_enabled`）：
@@ -399,10 +443,7 @@ func is_grip_enabled() -> bool:
 
 func _refresh() -> void:
 	var grip_active: bool = _enabled and grip_enabled
-	for ik in [_ik_l, _ik_r]:
-		if ik != null and is_instance_valid(ik):
-			ik.active = _enabled
-			ik.influence = 1.0
+	_apply_ik(_influence)
 	for grip in [_grip_l, _grip_r]:
 		if grip != null and is_instance_valid(grip):
 			grip.active = grip_active and grip.is_valid()
