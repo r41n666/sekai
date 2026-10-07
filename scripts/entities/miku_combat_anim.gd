@@ -53,7 +53,14 @@ const HIT_HEAD_DEG := 9.0## 头部后仰
 
 # ── 死亡：接管整个身体 ─────────────────────────────────────────────────────
 const DEATH_FALL_DEG := 74.0## 前倒角度（绕 right 轴）
-const DEATH_DROP_UNITS := 0.55## 整体下沉量（骨架空间单位，与 BOB_UNITS 同量纲）
+## 整体下沉量 = 骨架高度 × 该比例（**不是**绝对骨架单位）。
+## ⚠ 与 `MikuProceduralPose.BOB_RATIO` 同一类修复：原常量 `DEATH_DROP_UNITS = 0.55 骨架单位`
+##   是**绝对量**，在 miku.glb（骨架高 ≈23.539 单位）上正好，但在骨架单位小的模型上会等倍放大 ——
+##   cat_hatsune_miku（骨架高 1.51 单位）会下沉 0.64 m（人陷进地里）。
+##   折算成比例 = 0.55 / 23.5392299890518 ≈ 0.0233653 → **miku.glb 的下沉完全不变**（仍 0.55 单位 ≈4 cm）。
+## 守恒锚点：`death_drop_units(23.5392299890518) == 0.55`（见 tests/suites/test_combat_anim.gd）。
+const REFERENCE_HEIGHT := 23.5392299890518## 标定基准骨架高度（= miku.glb 骨架高，与 MikuProceduralPose 同一标定模型）
+const DEATH_DROP_RATIO := 0.55 / REFERENCE_HEIGHT
 const DEATH_LEG_DEG := 26.0## 松散的腿摆幅（倒地时腿不再交替迈步）
 const DEATH_KNEE_DEG := 52.0## 屈膝（膝盖朝后弯 = 负号，见 combat_offsets）
 const DEATH_ARM_EXTRA_DEG := 12.0## 手臂相对ARM_DOWN_DEG再垂下多少
@@ -134,10 +141,20 @@ static func envelope(action: int, u: float) -> float:
 			return 0.0
 
 
+## 死亡下沉量（骨架空间单位）：与骨架高度成正比。
+## 纯静态函数，便于 headless 逐值断言「换骨架时下沉按比例缩放」（见守恒对照测试）。
+static func death_drop_units(height: float) -> float:
+	return DEATH_DROP_RATIO * height
+
+
 ## 某个动作的**叠加量**（弧度 / 骨架空间单位），按 alpha 线性缩放。
 ##
 ## 纯函数：不碰实例状态、不碰骨骼。返回的字典**总是包含全部 CHANNELS 通道**
 ##（未参与的动作一律为 0.0），这样「不遗漏通道」可以被直接断言。
+##
+## `height` = 骨架高度（骨架空间单位）：**只有死亡的下沉量（`CH_DROP`）按它缩放**
+## （旋转通道与尺度无关）。缺省值 = miku.glb 标定基准（`REFERENCE_HEIGHT`），
+## 使既有的两参调用点行为**完全不变**（守恒）；生产调用方 `MikuProceduralPose` 会传入真实骨架高度。
 ##
 ## 符号约定（与 miku_procedural_pose.gd 里的骨骼摆放一致）：
 ##   - `pitch` 正 = 后仰（行走前倾 `lean` 是负向的，两个通道在 MikuProceduralPose 里相加）；
@@ -145,7 +162,7 @@ static func envelope(action: int, u: float) -> float:
 ##   - `arm_*_swing` 正 = 手臂**前摆**（与 `HOLD_ARM_FORWARD_DEG` 同向）；
 ##   - `knee` 负 = 膝盖朝后弯（与步态里`-_knee_amplitude` 同向）；
 ##   - `drop` 是**唯一**的位置通道，开火 / 受击 / 换弹恒为 0（后坐力归 RecoilSystem 管摄像机）。
-static func combat_offsets(action: int, alpha: float) -> Dictionary:
+static func combat_offsets(action: int, alpha: float, height: float = REFERENCE_HEIGHT) -> Dictionary:
 	var out := {}
 	for channel in CHANNELS:
 		out[channel] = 0.0
@@ -162,7 +179,7 @@ static func combat_offsets(action: int, alpha: float) -> Dictionary:
 			out[CH_HEAD] = deg_to_rad(HIT_HEAD_DEG) * w
 		Action.DEATH:
 			out[CH_PITCH] = -deg_to_rad(DEATH_FALL_DEG) * w
-			out[CH_DROP] = -DEATH_DROP_UNITS * w
+			out[CH_DROP] = -death_drop_units(height) * w
 			out[CH_LEG] = deg_to_rad(DEATH_LEG_DEG) * w
 			out[CH_KNEE] = -deg_to_rad(DEATH_KNEE_DEG) * w
 			out[CH_ARM_R_DOWN] = deg_to_rad(DEATH_ARM_EXTRA_DEG) * w

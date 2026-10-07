@@ -79,7 +79,7 @@ theme_override_constants/separation = 8
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.88, 0.95, 0.9)
 theme_override_font_sizes/font_size = 15
-text = "武器（点槽位 → 挑外观 / 皮肤；下面就是 3D 检视）"
+text = "武器（点槽位 → 挑皮肤；下面就是 3D 检视）"
 
 [node name="WeaponButtons" type="GridContainer" parent="Panel/HBox/RightVBox"]
 layout_mode = 2
@@ -97,21 +97,6 @@ script = ExtResource("2_preview")
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 14
-
-[node name="VariantBox" type="VBoxContainer" parent="Panel/HBox/RightVBox/ListsRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_constants/separation = 4
-
-[node name="VariantLabel" type="Label" parent="Panel/HBox/RightVBox/ListsRow/VariantBox"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.75, 0.88, 0.95, 0.9)
-theme_override_font_sizes/font_size = 15
-text = "外观（模型）"
-
-[node name="VariantList" type="VBoxContainer" parent="Panel/HBox/RightVBox/ListsRow/VariantBox"]
-layout_mode = 2
-theme_override_constants/separation = 4
 
 [node name="SkinBox" type="VBoxContainer" parent="Panel/HBox/RightVBox/ListsRow"]
 layout_mode = 2
@@ -132,4 +117,4 @@ theme_override_constants/separation = 4
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.85, 0.95, 0.6)
 theme_override_font_sizes/font_size = 13
-text = "外观 / 皮肤都会立即套到手上的武器上（原版皮肤 = 模型自带贴图）"
+text = "皮肤会立即套到手上的武器上（原版皮肤 = 模型自带贴图）"

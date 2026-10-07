@@ -346,13 +346,14 @@ func _apply_pose() -> void:
 ## 当前所有战斗动作的叠加量之和（死亡 / 开火 / 受击 / 换弹逐个求和）。
 ## 同一时刻通常只有一个动作（状态机里后触发者接管），但求和的写法让「叠加」语义显式化，
 ## 且包络重叠时不会出现硬切。
+## ⚠ 传入 `_height`（本骨架高度）：死亡的下沉量按骨架缩放，避免小骨架模型（如 cat）下沉过大。
 func _combat_offsets() -> Dictionary:
 	var list: Array = []
 	for action in [MikuCombatAnim.Action.FIRE, MikuCombatAnim.Action.HIT,
 			MikuCombatAnim.Action.DEATH, MikuCombatAnim.Action.RELOAD]:
 		var w := combat.overlay_alpha(action)
 		if w > 0.0:
-			list.append(MikuCombatAnim.combat_offsets(action, w))
+			list.append(MikuCombatAnim.combat_offsets(action, w, _height))
 	return MikuCombatAnim.sum_offsets(list)
 
 

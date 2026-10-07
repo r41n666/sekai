@@ -40,6 +40,12 @@ signal died_bot(bot: Node)
 @export var hit_flash_alpha := 0.8
 @export var hit_sound_db := -8.0
 
+## 受击音效路径（玩家与敌人**共用同一素材**：用户要求"受击音效只用 sfx 里的 hit_f_01.wav"）
+const HIT_SOUND_PATH := "res://sfx/hit_female/hit_f_01.wav"
+## 受击音的随机音高范围（连续受击不单调）
+const HIT_PITCH_MIN := 0.9
+const HIT_PITCH_MAX := 1.15
+
 @onready var _collision: CollisionShape3D = $CollisionShape3D
 @onready var _model: MikuModel = $MikuModel
 @onready var _rifle: Node3D = $MikuModel/WeaponMount/Rifle
@@ -177,7 +183,7 @@ func take_damage(amount: float, _source: Node = null) -> void:
 	health = maxf(health - amount, 0.0)
 	_flash_alpha = hit_flash_alpha
 	_lean = hit_lean
-	_hit_audio.pitch_scale = randf_range(0.9, 1.15)
+	_hit_audio.pitch_scale = randf_range(HIT_PITCH_MIN, HIT_PITCH_MAX)
 	_hit_audio.play()
 	_model.play_hit()
 	if health <= 0.0:
@@ -249,17 +255,37 @@ func _collect_meshes(node: Node) -> Array[MeshInstance3D]:
 	return out
 
 
-## 受击音效：程序化合成的短促「闷哼」（下滑音 + 噪声质感），参考 audio_3d.gd 的合成方式
+## 受击音效：优先用真实采样 `sfx/hit_female/hit_f_01.wav`；加载失败时**静默降级**到程序化合成音。
 func _setup_hit_audio() -> void:
 	_hit_audio = AudioStreamPlayer3D.new()
 	_hit_audio.name = "HitAudio"
 	_hit_audio.unit_size = 8.0
 	_hit_audio.max_distance = 60.0
 	_hit_audio.volume_db = hit_sound_db
-	_hit_audio.stream = _build_hit_sound()
+	_hit_audio.stream = _load_hit_sound()
 	add_child(_hit_audio)
 
 
+## 加载受击音（多级降级，绝不崩、不报错刷屏）：
+##   ① `AudioStreamWAV.load_from_file` **直读 WAV** —— headless / 未导入 / 源码运行都能出声
+##      （该 wav 无需 Godot 导入器；`sfx/` 下本就无 `.import`）；
+##   ② 退回 Godot 导入资源（编辑器 / 导出包里的 `load()`）；
+##   ③ 仍失败 → 退回 `_build_hit_sound()` 程序化合成音（保证人机永远有受击反馈）。
+func _load_hit_sound() -> AudioStream:
+	if FileAccess.file_exists(HIT_SOUND_PATH):
+		var direct := AudioStreamWAV.load_from_file(HIT_SOUND_PATH)
+		if direct != null:
+			return direct
+	if ResourceLoader.exists(HIT_SOUND_PATH):
+		var imported := load(HIT_SOUND_PATH)
+		if imported is AudioStream:
+			return imported
+	push_warning("Bot：受击音 %s 加载失败，退回程序化合成音" % HIT_SOUND_PATH)
+	return _build_hit_sound()
+
+
+## 受击音效的**降级素材**：程序化合成的短促「闷哼」（下滑音 + 噪声质感），参考 audio_3d.gd 的合成方式。
+## ⚠ 仅当 `sfx/hit_female/hit_f_01.wav` 加载失败时才用（用户要求"只用"该 wav，但绝不能因此崩）。
 func _build_hit_sound() -> AudioStreamWAV:
 	var rate := 44100
 	var duration := 0.18

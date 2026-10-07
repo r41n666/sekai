@@ -387,6 +387,71 @@ func test_death_takes_over_the_whole_body() -> void:
 	check_true(float(off[MikuCombatAnim.CH_ARM_L_DOWN]) != 0.0, "死亡应接管左臂")
 
 
+# ---------------------------------------------------------------------------
+# ③b 死亡下沉量按骨架高度缩放（与 MikuProceduralPose.BOB_RATIO 同类修复）
+# ---------------------------------------------------------------------------
+## 由来：原 `DEATH_DROP_UNITS = 0.55` 是**绝对骨架单位**，在 miku.glb（骨架高 ≈23.54 单位）上
+## ≈4 cm 正好，但在 cat_hatsune_miku（骨架高仅 1.51 单位）上被放大成 ≈0.64 m —— 人陷进地里。
+## 改法：按骨架高度的**比例**缩放（`death_drop_units(height)`），miku.glb 数值守恒。
+## 断言口径（§4-16 双向）：一律用**行为 / 比例**断言，不锁字面量写法，避免误杀等价改写。
+
+## miku.glb 的骨架高度（`DEATH_DROP` 的原始标定基准；与 test_procedural_legs_layer.gd 一致）
+const MIKU_HEIGHT := 23.5392299890518
+## cat_hatsune_miku 的骨架高度 / 骨架→世界缩放（实测值，同 test_procedural_legs_layer.gd）
+const CAT_HEIGHT := 1.5117363078316
+const CAT_SCALE := 1.15967452526093
+
+
+## 守恒锚点：折算成比例后，miku.glb 的死亡下沉必须仍是 0.55 骨架单位（与修改前一致）。
+func test_death_drop_conserves_miku_calibration() -> void:
+	check_near(MikuCombatAnim.death_drop_units(MIKU_HEIGHT), 0.55, 0.001,
+		"miku.glb（骨架高 23.54）的死亡下沉必须仍是 0.55 骨架单位——不得回归")
+
+
+## 下沉量与骨架高度成正比（不锁具体常量，任何等比例写法都应通过）。
+func test_death_drop_is_proportional_to_height() -> void:
+	check_near(MikuCombatAnim.death_drop_units(2.0), MikuCombatAnim.death_drop_units(1.0) * 2.0, 1e-6,
+		"高度翻倍 → 下沉翻倍")
+	check_near(MikuCombatAnim.death_drop_units(0.0), 0.0, 1e-9, "零高度 → 零下沉")
+
+
+## 下沉 / 高度 是**尺度无关常量**（换骨架不改比例）。
+func test_death_drop_ratio_is_scale_free() -> void:
+	var r1 := MikuCombatAnim.death_drop_units(10.0) / 10.0
+	var r2 := MikuCombatAnim.death_drop_units(3.0) / 3.0
+	check_near(r1, r2, 1e-9, "下沉/高度 必须与骨架尺度无关（换模型姿势比例不变）")
+
+
+## 关键回归：cat_hatsune_miku 的死亡下沉必须回到厘米级（修复前 ≈0.64 m，人陷进地里）。
+func test_cat_death_drop_is_not_exaggerated() -> void:
+	var drop_units := MikuCombatAnim.death_drop_units(CAT_HEIGHT)
+	check_ge(drop_units, 0.0, "下沉量不得为负")
+	check_le(drop_units * CAT_SCALE, 0.06,
+		"cat 死亡下沉必须 ≤ 6 cm（修复前实为 ≈64 cm；这是本修复可用的前提）")
+	check_ge(drop_units * CAT_SCALE, 0.01,
+		"cat 死亡下沉也不应为 0（要保留可见的下沉感）")
+
+
+## combat_offsets 的 drop 通道必须按**传入的骨架高度**缩放（而不是写死 miku 的值）。
+func test_death_drop_channel_scales_with_skeleton_height() -> void:
+	var miku := MikuCombatAnim.combat_offsets(MikuCombatAnim.Action.DEATH, 1.0, MIKU_HEIGHT)
+	var cat := MikuCombatAnim.combat_offsets(MikuCombatAnim.Action.DEATH, 1.0, CAT_HEIGHT)
+	check_near(float(miku[MikuCombatAnim.CH_DROP]), -0.55, 0.001,
+		"满强度 miku 死亡的 drop 通道应为 -0.55 骨架单位")
+	check_near(float(cat[MikuCombatAnim.CH_DROP]), -MikuCombatAnim.death_drop_units(CAT_HEIGHT), 1e-6,
+		"cat 死亡的 drop 通道应按其骨架高度缩放（不是 miku 的绝对值）")
+	check_true(absf(float(cat[MikuCombatAnim.CH_DROP])) < absf(float(miku[MikuCombatAnim.CH_DROP])) * 0.2,
+		"cat 的死亡下沉必须远小于 miku（约 1/15，证明真的按高度缩放了）")
+
+
+## 两参调用的默认高度必须是 miku 标定基准（保证既有调用点行为不变 = 守恒锚点）。
+func test_default_height_preserves_miku_behavior() -> void:
+	var two_args := MikuCombatAnim.combat_offsets(MikuCombatAnim.Action.DEATH, 1.0)
+	var three_args := MikuCombatAnim.combat_offsets(MikuCombatAnim.Action.DEATH, 1.0, MIKU_HEIGHT)
+	check_near(float(two_args[MikuCombatAnim.CH_DROP]), float(three_args[MikuCombatAnim.CH_DROP]), 1e-6,
+		"两参调用的默认高度必须是 miku 标定基准（否则既有调用点会静默改变表现）")
+
+
 ## 负 alpha 不得产生反向旋转（包络只降不升，绝不该「倒放」动作）。
 func test_negative_alpha_does_not_invert_offsets() -> void:
 	var off := MikuCombatAnim.combat_offsets(MikuCombatAnim.Action.FIRE, -1.0)
@@ -565,6 +630,26 @@ func test_bot_has_fire_hit_and_death_actions() -> void:
 	check_true(i_zero < 0 or i_hit < i_zero,
 		"bot.gd 受击动作应在归零判定之前（活着就该有受击反应）")
 	check_true(body.find("play_death()") >= 0, "bot.gd 归零时必须触发死亡动作")
+
+
+## 受击音效：**玩家与敌人**都必须用 `sfx/hit_female/hit_f_01.wav`（用户要求"只用"该 wav），
+## 且都要有 3D 音频节点 + 随机音高；并且用 `load_from_file` 直读（headless / 未导入也能出声）。
+func test_hit_sound_wired_for_bot_and_player() -> void:
+	var cases := [["bot.gd", _read_source(BOT_SRC)], ["player.gd", _read_source(PLAYER_SRC)]]
+	for case in cases:
+		var file_name: String = case[0]
+		var src: String = case[1]
+		check_true(src.find("sfx/hit_female/hit_f_01.wav") >= 0,
+			"%s 必须引用 sfx/hit_female/hit_f_01.wav（两端共用同一素材）" % file_name)
+		check_true(src.find("AudioStreamPlayer3D") >= 0,
+			"%s 必须有一台 AudioStreamPlayer3D 受击音节点" % file_name)
+		check_true(src.find("load_from_file") >= 0,
+			"%s 必须用 AudioStreamWAV.load_from_file 直读（headless / 未导入也能出声）" % file_name)
+		check_true(src.find("randf_range") >= 0,
+			"%s 的受击音必须有随机音高（连续受击不单调）" % file_name)
+	# bot 保留程序化合成音作为**降级**（wav 加载失败也不该让人机彻底没有受击反馈）
+	check_true(_read_source(BOT_SRC).find("_build_hit_sound") >= 0,
+		"bot.gd 必须保留 _build_hit_sound() 作为降级路径")
 
 
 ## 程序化姿态必须在 valid 判断之前推进战斗计时，但绝不碰骨骼（降级安全）。

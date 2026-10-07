@@ -60,6 +60,9 @@ signal weapon_changed(weapon: Node)
 
 @export_group("生命值")
 @export var max_health := 100.0
+## 受击音效音量（dB）。玩家侧原本**没有任何受击音**（被敌人打中时静音），本次补上；
+## 素材与 `bot.gd` 共用同一 wav（用户要求两端都用 hit_f_01.wav）。
+@export var hit_sound_db := -8.0
 
 @onready var _model: MikuModel = $MikuModel
 @onready var _collision: CollisionShape3D = $CollisionShape3D
@@ -80,6 +83,12 @@ const STANCE_HEIGHTS := [1.8, 1.2, 0.8]
 const STANCE_CAMERA_Y := [1.6, 1.05, 0.35]
 const STANCE_SPEED_SCALE := [1.0, 0.5, 0.25]
 
+## 受击音效路径（玩家与敌人共用同一素材；与 bot.gd 一致）
+const HIT_SOUND_PATH := "res://sfx/hit_female/hit_f_01.wav"
+## 受击音的随机音高范围（连续受击不单调）
+const HIT_PITCH_MIN := 0.9
+const HIT_PITCH_MAX := 1.15
+
 var health := 0.0
 ## 出生点（重生用，_ready 时按生成位置记录）
 var spawn_position := Vector3.ZERO
@@ -97,6 +106,8 @@ var _free_look_yaw := 0.0
 var _free_look_pitch := 0.0
 var _aiming := false
 var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)
+## 受击音播放节点（3D，跟随玩家位置；玩家侧原本没有）
+var _hit_audio: AudioStreamPlayer3D
 
 ## 联机状态同步：广播间隔（秒）与远端平滑速度
 const NET_SYNC_INTERVAL := 0.033
@@ -124,6 +135,7 @@ func _ready() -> void:
 	if capsule != null:
 		_collision.shape = capsule.duplicate()
 	_build_weapons()
+	_setup_hit_audio()
 	if is_multiplayer_authority():
 		_setup_local_player()
 	else:
@@ -172,6 +184,34 @@ func _setup_remote_player() -> void:
 		material.albedo_color = Color(0.42, 0.68, 0.95)
 		material.roughness = 0.6
 		placeholder.material_override = material
+
+
+## 受击音节点（玩家侧新增）：3D 播放，位置跟随玩家，受击时由 `take_damage` 触发。
+## 素材 = `sfx/hit_female/hit_f_01.wav`（与 bot.gd 同款）。
+func _setup_hit_audio() -> void:
+	_hit_audio = AudioStreamPlayer3D.new()
+	_hit_audio.name = "HitAudio"
+	_hit_audio.unit_size = 8.0
+	_hit_audio.max_distance = 60.0
+	_hit_audio.volume_db = hit_sound_db
+	_hit_audio.stream = _load_hit_sound()
+	add_child(_hit_audio)
+
+
+## 加载受击音（多级降级，绝不崩、不报错刷屏）：
+##   ① `AudioStreamWAV.load_from_file` **直读 WAV** —— headless / 未导入 / 源码运行都能出声；
+##   ② 退回 Godot 导入资源（编辑器 / 导出包）；③ 都失败 → 返回 null（**静音**，即玩家侧的原始行为）。
+func _load_hit_sound() -> AudioStream:
+	if FileAccess.file_exists(HIT_SOUND_PATH):
+		var direct := AudioStreamWAV.load_from_file(HIT_SOUND_PATH)
+		if direct != null:
+			return direct
+	if ResourceLoader.exists(HIT_SOUND_PATH):
+		var imported := load(HIT_SOUND_PATH)
+		if imported is AudioStream:
+			return imported
+	push_warning("Player：受击音 %s 加载失败，玩家受击将静音" % HIT_SOUND_PATH)
+	return null
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -492,6 +532,11 @@ func take_damage(amount: float, _source: Node = null) -> void:
 	#   ⛔ 绝不可让射手端按 `_display_health <= 0` 播死亡：那是**显示副本**，不是血量真值
 	#   （control_checklist §4-9 同源纪律）。
 	_model.play_hit()
+	# 受击音（玩家侧原本没有，被敌人打中是静音的）：与受击动作同一权威判定点；
+	# 随机音高（0.9~1.15）避免连续受击单调。素材加载失败时 stream=null → 静默跳过（降级）。
+	if _hit_audio != null and _hit_audio.stream != null:
+		_hit_audio.pitch_scale = randf_range(HIT_PITCH_MIN, HIT_PITCH_MAX)
+		_hit_audio.play()
 	if health <= 0.0:
 		_model.play_death()
 		died.emit()
